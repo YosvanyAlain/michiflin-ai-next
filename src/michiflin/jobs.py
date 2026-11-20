@@ -240,6 +240,13 @@ class JobQueue:
             raise AppError("job_lease_expired")
         return row
 
+    def artifact_input(self, claim: Claim, field: str) -> tuple[str, int, int, object]:
+        """Trusted worker binding from the durable lease, never member-supplied owner or host paths."""
+        with self.ledger.connection() as db:
+            row = self._leased(db, claim)
+            self._binding(db, row["instance"], row["owner"], row["chat"])
+            return row["owner"], row["chat"], row["instance"], json.loads(row["payload"]).get(field)
+
     def heartbeat(self, claim: Claim, *, current: int, total: int, checkpoint: dict | None = None) -> dict:
         if type(current) is not int or type(total) is not int or not 0 <= current <= total <= 10**12:
             raise AppError("invalid_job_progress")
@@ -272,6 +279,13 @@ class JobQueue:
             db.execute("UPDATE jobs SET state=?,remaining=?,updated=? WHERE id=?", (state, remaining, now, row["id"]))
 
     def finish(self, claim: Claim, *, result: dict | None = None, error: str | None = None) -> None:
+        self._finish(claim, result=result, error=error, offline=False)
+
+    def finish_offline(self, claim: Claim, *, result: dict | None = None, error: str | None = None) -> None:
+        """Discard side-effect-free output if a control/revocation won the publication race."""
+        self._finish(claim, result=result, error=error, offline=True)
+
+    def _finish(self, claim: Claim, *, result: dict | None, error: str | None, offline: bool) -> None:
         if error is not None and (not isinstance(error, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", error)):
             raise AppError("invalid_job_error")
         if (result is None) == (error is None):
@@ -279,8 +293,22 @@ class JobQueue:
         encoded = _json(result, 64000) if result is not None else None
         with self.ledger.transaction() as db:
             row = self._leased(db, claim)
+            now = self._now()
+            if offline:
+                state = row["state"]
+                try:
+                    self._binding(db, row["instance"], row["owner"], row["chat"])
+                except AppError:
+                    state = "cancelling"
+                if state in {"pausing", "cancelling"}:
+                    remaining = max(0, row["remaining"] - max(0, now - row["started"]))
+                    state = "cancelled" if state == "cancelling" else "paused" if remaining > 0 else "expired"
+                    db.execute("UPDATE jobs SET state=?,remaining=?,updated=? WHERE id=?", (state, remaining, now, row["id"]))
+                    return
+                if error is None:
+                    db.execute("UPDATE jobs SET current=MAX(total,1),total=MAX(total,1) WHERE id=?", (row["id"],))
             db.execute("UPDATE jobs SET state=?,result=?,error=?,updated=? WHERE id=?",
-                       ("completed" if error is None else "failed", encoded, error, self._now(), row["id"]))
+                       ("completed" if error is None else "failed", encoded, error, now, row["id"]))
 
     def worker_stopped(self, claim: Claim) -> None:
         """Only a trusted parent may call this after actually reaping the worker process."""

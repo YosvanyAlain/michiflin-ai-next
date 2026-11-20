@@ -352,3 +352,23 @@ def test_reconciliation_rejects_retry_and_unstructured_evidence(queue, kwargs):
     job = enqueue(queue)
     with pytest.raises(AppError, match="invalid_job_resolution"):
         queue.reconcile(job["id"], **kwargs)
+
+
+def test_worker_input_binding_uses_persisted_payload_and_fenced_identity(queue):
+    enqueue(queue)
+    claim = queue.claim()
+    claim.payload['text'] = 'cannot replace durable worker input'
+    assert queue.artifact_input(claim, 'text') == ('owner-a', 10, 1, 'sample')
+    with pytest.raises(AppError, match='job_lease_invalid'):
+        queue.artifact_input(replace(claim, token='0' * 64), 'text')
+    queue.clock.value += 31
+    with pytest.raises(AppError, match='job_lease_expired'):
+        queue.artifact_input(claim, 'text')
+
+
+def test_revocation_blocks_new_worker_input_binding(queue):
+    enqueue(queue)
+    claim = queue.claim()
+    queue.ledger.revoke(1)
+    with pytest.raises(AppError, match='instance_not_authorized'):
+        queue.artifact_input(claim, 'text')

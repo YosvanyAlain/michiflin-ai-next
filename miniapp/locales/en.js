@@ -466,5 +466,9 @@ window.MichiflinLocales.en = {
   "artifact_state_failed": "Copy failed",
   "artifact_state_uncertain": "Needs verification",
   "cancel": "Cancel",
-  "file_hash_unavailable": "This client cannot verify the file hash. No export was prepared."
+  "file_hash_unavailable": "This client cannot verify the file hash. No export was prepared.",
+  "invalid_sandbox_file": "The worker input must be a bounded private regular file.",
+  "job_artifact_store_mismatch": "The isolated worker has no matching private file store. Execution is disabled.",
+  "job_input_unavailable": "The job input is deleted, unavailable, changed or outside this workspace.",
+  "invalid_checksum_job": "Select exactly one server copy for checksum verification."
 };

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import math
+import re
 import threading
 import time
 from collections.abc import Mapping
+from contextlib import ExitStack
 from dataclasses import dataclass, replace
 
 from . import sandbox
+from .artifacts import ArtifactStore
 from .errors import AppError
 from .jobs import JobQueue, Kind
 
@@ -16,10 +19,13 @@ class OfflineHandler:
     kind: Kind
     script: str
     policy: sandbox.Policy = sandbox.Policy()
+    artifact_field: str | None = None
 
     def __post_init__(self):
         if (not isinstance(self.kind, Kind) or not isinstance(self.script, str)
-                or not 1 <= len(self.script.encode()) <= 32000 or not isinstance(self.policy, sandbox.Policy)):
+                or not 1 <= len(self.script.encode()) <= 32000 or not isinstance(self.policy, sandbox.Policy)
+                or (self.artifact_field is not None and (not isinstance(self.artifact_field, str)
+                    or not re.fullmatch(r"[a-z][a-z0-9_]{0,31}", self.artifact_field)))):
             raise ValueError("Invalid reviewed offline handler")
 
 
@@ -31,8 +37,8 @@ class OfflineRunner:
     The hosting supervisor must hold runtime.lock and own all runner threads until shutdown.
     """
 
-    def __init__(self, queue: JobQueue, handlers: Mapping[str, OfflineHandler]) -> None:
-        self.queue, self.handlers = queue, dict(handlers)
+    def __init__(self, queue: JobQueue, handlers: Mapping[str, OfflineHandler], *, artifacts: ArtifactStore | None = None) -> None:
+        self.queue, self.handlers, self.artifacts = queue, dict(handlers), artifacts
         self._validate()
         # Probe once during trusted supervisor setup, not as an unadmitted per-job process.
         if self.handlers and not sandbox.available():
@@ -43,6 +49,9 @@ class OfflineRunner:
                 or any(not isinstance(handler, OfflineHandler) or handler.kind != self.queue.kinds[name]
                        for name, handler in self.handlers.items())):
             raise AppError("job_handler_mismatch")
+        if (any(handler.artifact_field is not None for handler in self.handlers.values())
+                and (not isinstance(self.artifacts, ArtifactStore) or self.artifacts.ledger is not self.queue.ledger)):
+            raise AppError("job_artifact_store_mismatch")
 
     def run_once(self, stop: threading.Event | None = None) -> bool:
         self._validate()
@@ -71,17 +80,29 @@ class OfflineRunner:
 
         try:
             try:
-                result = sandbox.run(handler.script, claim.payload, policy=policy, stop=local_stop, tick=tick)
+                with ExitStack() as resources:
+                    tick()
+                    if local_stop.is_set():
+                        raise AppError("sandbox_cancelled")
+                    inputs = {}
+                    if handler.artifact_field is not None:
+                        try:
+                            binding = self.queue.artifact_input(claim, handler.artifact_field)
+                            stream = resources.enter_context(self.artifacts.open(*binding))
+                        except (AppError, OSError):
+                            raise AppError("job_input_unavailable") from None
+                        inputs["input_file"] = stream
+                    result = sandbox.run(handler.script, claim.payload, policy=policy, stop=local_stop, tick=tick, **inputs)
             except AppError as error:
                 if error.code == "sandbox_cancelled" and control in {"pausing", "cancelling"}:
                     self.queue.acknowledge(claim, "pause" if control == "pausing" else "cancel")
                 elif error.code != "sandbox_cancelled":
-                    if not error.code.startswith("sandbox_"):
+                    if not error.code.startswith("sandbox_") and error.code != "job_input_unavailable":
                         raise
-                    self.queue.finish(claim, error=error.code)
+                    self.queue.finish_offline(claim, error=error.code)
                 # Hosting shutdown leaves this job uncertain, never user-cancelled or replayable.
             else:
-                self.queue.finish(claim, result=result)
+                self.queue.finish_offline(claim, result=result)
         finally:
             # sandbox.run always reaps before returning, including callback failures and cancellation.
             self.queue.worker_stopped(claim)

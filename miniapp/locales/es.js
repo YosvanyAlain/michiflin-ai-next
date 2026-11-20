@@ -466,5 +466,9 @@ window.MichiflinLocales.es = {
   "artifact_state_failed": "Copia fallida",
   "artifact_state_uncertain": "Pendiente de verificación",
   "cancel": "Cancelar",
-  "file_hash_unavailable": "Este cliente no puede verificar la suma del archivo. No se preparó la exportación."
+  "file_hash_unavailable": "Este cliente no puede verificar la suma del archivo. No se preparó la exportación.",
+  "invalid_sandbox_file": "La entrada del trabajador debe ser un archivo privado normal de tamaño permitido.",
+  "job_artifact_store_mismatch": "El trabajador aislado no tiene un almacén privado compatible. La ejecución está desactivada.",
+  "job_input_unavailable": "La entrada del trabajo fue eliminada, no está disponible, cambió o pertenece a otro espacio.",
+  "invalid_checksum_job": "Selecciona exactamente una copia del servidor para verificar su suma."
 };

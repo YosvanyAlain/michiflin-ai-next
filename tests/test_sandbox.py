@@ -170,3 +170,71 @@ def test_invalid_input_rejected_without_execution(payload):
 def test_json_only_output_does_not_execute_python(isolated):
     with pytest.raises(AppError, match="sandbox_result_invalid"):
         sandbox.run('print("__import__(\\\"os\\\").getcwd()")', {})
+
+
+def test_explicit_file_is_read_only_and_does_not_expose_vault_or_change_parent_offset(isolated, tmp_path):
+    source = tmp_path / 'private-file'
+    source.write_bytes(b'synthetic private contents')
+    (tmp_path / 'sibling-secret').write_bytes(b'must stay private')
+    script = '''import hashlib,json,os
+with open('/input.bin','rb') as f: data=f.read()
+try:
+    open('/input.bin','wb').write(b'changed')
+    readonly=False
+except OSError:
+    readonly=True
+print(json.dumps({'sha256':hashlib.sha256(data).hexdigest(),'bytes':len(data),
+                  'readonly':readonly,'root':os.listdir('/')}))
+'''
+    import hashlib
+    with source.open('rb') as stream:
+        stream.seek(4)
+        result = sandbox.run(script, {}, input_file=stream)
+        assert stream.tell() == 4
+    assert result['sha256'] == hashlib.sha256(source.read_bytes()).hexdigest()
+    assert result['bytes'] == source.stat().st_size and result['readonly']
+    assert 'sibling-secret' not in result['root']
+    assert source.read_bytes() == b'synthetic private contents'
+    assert sandbox.run('import os,json; print(json.dumps({"input":os.path.exists("/input.bin")}))', {}) == {'input': False}
+
+
+def test_oversized_or_nonfile_inputs_are_rejected_before_launch(isolated, tmp_path, monkeypatch):
+    import io
+    source = tmp_path / 'large'
+    with source.open('wb') as stream:
+        stream.truncate(16 * 1024 * 1024 + 1)
+    monkeypatch.setattr(sandbox.subprocess, 'Popen', lambda *a, **k: pytest.fail('Must not start'))
+    for stream in (None, io.BytesIO(b'x'), str(source)):
+        if stream is not None:
+            with pytest.raises(AppError, match='invalid_sandbox_file'):
+                sandbox.run('print("{}")', {}, input_file=stream)
+    with source.open('rb') as stream, pytest.raises(AppError, match='invalid_sandbox_file'):
+        sandbox.run('print("{}")', {}, input_file=stream)
+    with open('/dev/null', 'rb') as stream, pytest.raises(AppError, match='invalid_sandbox_file'):
+        sandbox.run('print("{}")', {}, input_file=stream)
+
+
+def test_large_file_input_is_not_an_inline_json_or_output_limit(isolated, tmp_path):
+    source = tmp_path / 'large'
+    with source.open('wb') as stream:
+        stream.truncate(16 * 1024 * 1024)
+    script = '''import hashlib,json
+h=hashlib.sha256(); size=0
+with open('/input.bin','rb') as f:
+    for b in iter(lambda:f.read(65536),b''):
+        h.update(b); size+=len(b)
+print(json.dumps({'bytes':size,'sha256':h.hexdigest()}))
+'''
+    with source.open('rb') as stream:
+        result = sandbox.run(script, {}, input_file=stream)
+    import hashlib
+    assert result == {'bytes': 16 * 1024 * 1024, 'sha256': hashlib.sha256(bytes(16 * 1024 * 1024)).hexdigest()}
+
+
+def test_hardlinked_input_is_rejected_without_starting_worker(isolated, tmp_path, monkeypatch):
+    source = tmp_path / 'source'
+    source.write_bytes(b'synthetic')
+    os.link(source, tmp_path / 'link')
+    monkeypatch.setattr(sandbox.subprocess, 'Popen', lambda *a, **k: pytest.fail('Must not start'))
+    with source.open('rb') as stream, pytest.raises(AppError, match='invalid_sandbox_file'):
+        sandbox.run('print("{}")', {}, input_file=stream)

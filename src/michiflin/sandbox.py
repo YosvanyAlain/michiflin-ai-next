@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import sysconfig
@@ -14,7 +15,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -68,8 +69,29 @@ def _filter(target) -> None:
     target.seek(0)
 
 
+@contextmanager
+def _input_file(stream):
+    """Reopen a trusted regular-file descriptor without exposing its host path or sharing its offset."""
+    if stream is None:
+        yield None
+        return
+    try:
+        descriptor = stream.fileno()
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink > 1 or not 0 <= before.st_size <= 16 * 1024 * 1024:
+            raise AppError("invalid_sandbox_file")
+        reopened = os.open(f"/proc/self/fd/{descriptor}", os.O_RDONLY | os.O_CLOEXEC)
+    except (AttributeError, OSError, TypeError, ValueError):
+        raise AppError("invalid_sandbox_file") from None
+    with os.fdopen(reopened, "rb") as source:
+        after = os.fstat(source.fileno())
+        if (before.st_dev, before.st_ino, before.st_size) != (after.st_dev, after.st_ino, after.st_size):
+            raise AppError("invalid_sandbox_file")
+        yield source
+
+
 def run(script: str, payload: dict, *, policy: Policy | None = None,
-        stop: threading.Event | None = None, tick: Callable[[], None] | None = None) -> dict:
+        stop: threading.Event | None = None, tick: Callable[[], None] | None = None, input_file=None) -> dict:
     """Run Python offline in Linux namespaces. No credentials, host workspace or child processes.
 
     This primitive is not a general user-facing code execution operation. Callers must enforce
@@ -90,7 +112,7 @@ def run(script: str, payload: dict, *, policy: Policy | None = None,
         raise AppError("sandbox_unavailable")
     # Anonymous descriptors avoid named artifacts, leaked prompts and cross-job work directories.
     with tempfile.TemporaryFile() as source, tempfile.TemporaryFile() as request, \
-            tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as rules:
+            tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as rules, _input_file(input_file) as file_input:
         source.write(script.encode())
         source.seek(0)
         request.write(encoded)
@@ -111,6 +133,10 @@ def run(script: str, payload: dict, *, policy: Policy | None = None,
         for path in ("/lib", "/lib64", "/bin"):
             if os.path.isdir(path):
                 command.extend(["--ro-bind", path, path])
+        descriptors = (source.fileno(), rules.fileno())
+        if file_input is not None:
+            command.extend(["--ro-bind-data", str(file_input.fileno()), "/input.bin"])
+            descriptors += (file_input.fileno(),)
         command.extend(["--dev", "/dev", "--remount-ro", "/dev", "--size", str(policy.temporary_bytes),
                         "--tmpfs", "/tmp", "--ro-bind-data", str(source.fileno()), "/handler.py",
                         "--remount-ro", "/", "--chdir", "/tmp", "--seccomp", str(rules.fileno()), "--",
@@ -121,7 +147,7 @@ def run(script: str, payload: dict, *, policy: Policy | None = None,
         try:
             process = subprocess.Popen(command, stdin=request, stdout=output, stderr=subprocess.DEVNULL,
                                        env={"PATH": "/usr/local/bin:/usr/bin:/bin"}, close_fds=True,
-                                       pass_fds=(source.fileno(), rules.fileno()), start_new_session=True)
+                                       pass_fds=descriptors, start_new_session=True)
         except OSError:
             raise AppError("sandbox_unavailable") from None
         failure = None

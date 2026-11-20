@@ -113,3 +113,42 @@ def test_native_blob_attachment_copy_with_simulated_incoming_event_never_starts_
             assert copied.read() == source.read_bytes()
         assert source.read_bytes() == b'Synthetic native blob copy; original preserved.'
         assert not service.ledger.has_instance(outgoing)
+
+
+def test_native_blob_copy_can_be_hashed_in_offline_isolated_worker_without_executing_xdc(tmp_path):
+    import os
+
+    from michiflin import sandbox
+    from michiflin.artifacts import ArtifactStore
+    from michiflin.file_jobs import CHECKSUM_HANDLER, CHECKSUM_KIND
+    from michiflin.job_runner import OfflineRunner
+    from michiflin.jobs import JobQueue
+    from michiflin.storage import Ledger
+
+    if not sandbox.available():
+        if os.environ.get('MICHIFLIN_REQUIRE_SANDBOX') == '1':
+            pytest.fail('Required namespace/seccomp sandbox is unavailable')
+        pytest.skip('Offline artifact worker remains disabled without isolation')
+    with core.IOTransport(accounts_dir=str(tmp_path / 'accounts')) as transport:
+        rpc = core.Rpc(transport)
+        account = rpc.add_account()
+        configure_offline(rpc, account, 'bot@example.invalid')
+        package = build(Path(__file__).resolve().parents[1] / 'miniapp', tmp_path / 'packages')
+        native_message = rpc.send_msg(account, rpc.create_chat_by_contact_id(account, 1),
+                                      core.MessageData(file=str(package), text='Synthetic offline input'))
+        native = rpc.get_message(account, native_message)
+        assert native.file and rpc.get_webxdc_info(account, native_message).name == 'Michiflin AI'
+        ledger = Ledger(tmp_path / 'state')
+        ledger.bind(native_message, 'synthetic-native-owner', native.chat_id)
+        store = ArtifactStore(ledger)
+        artifact = store.import_file('synthetic-native-owner', native.chat_id, native_message,
+                                     'synthetic-native-source', 'input.xdc', Path(native.file))
+        jobs = JobQueue(ledger, kinds={CHECKSUM_KIND: CHECKSUM_HANDLER.kind})
+        job = jobs.enqueue('synthetic-native-owner', native.chat_id, native_message,
+                           'synthetic-native-checksum', CHECKSUM_KIND, {'artifact': artifact['id']})
+        runner = OfflineRunner(jobs, {CHECKSUM_KIND: CHECKSUM_HANDLER}, artifacts=store)
+        assert runner.run_once()
+        result = jobs.get('synthetic-native-owner', native.chat_id, native_message, job['id'])
+        assert result['state'] == 'completed' and result['worker_stopped']
+        assert result['result'] == {key: artifact[key] for key in ('bytes', 'sha256')}
+        assert Path(native.file).read_bytes() == package.read_bytes()
