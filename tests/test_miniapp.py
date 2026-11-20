@@ -295,3 +295,47 @@ def test_file_fingerprint_and_image_optimizer_do_not_upload_inputs(tmp_path):
         assert page.get_by_role("link", name="Save JPEG").get_attribute("download") == "michiflin-image.jpg"
         assert page.evaluate("Michiflin.transport.tasks.length") == 0
         assert errors == []
+
+
+def test_cached_weather_marks_stale_data_and_pauses_condition_animation(tmp_path):
+    with browser(tmp_path, connected=False) as (page, errors):
+        page.evaluate("""()=>Michiflin.storage.write('weather',{
+          effect:'rain',season:'winter',as_of:Date.now()/1000-7200,stale:false,
+          current:{temperature_2m:8},place:{name:'Synthetic cached city'},timezone:'UTC'
+        })""")
+        page.reload()
+        widget = page.locator(".weather-widget")
+        assert widget.get_attribute("data-season") == "winter"
+        assert widget.get_attribute("data-stale") == "true"
+        assert "Meteorological winter" in widget.inner_text()
+        assert page.locator(".weather-stale").is_visible()
+        assert page.locator(".rain-drop").first.evaluate("node=>getComputedStyle(node).animationPlayState") == "paused"
+        widget.focus()
+        page.keyboard.press("Enter")
+        assert page.locator("#weather-results").is_visible()
+        assert errors == []
+
+
+def test_upstream_book_failure_offers_an_explicit_catalogue_not_fake_downloads(tmp_path, monkeypatch):
+    from michiflin.errors import AppError
+
+    original = SourceFixture.get
+
+    def unavailable(self, url, params=None):
+        if "gutendex" in url:
+            raise AppError("source_unavailable")
+        if "openlibrary" in url:
+            return {"numFound": 1, "docs": [{"key": "/works/OL123W", "title": "Synthetic catalogue book", "author_name": ["Writer"], "ebook_access": "no_ebook"}]}
+        return original(self, url, params)
+
+    monkeypatch.setattr(SourceFixture, "get", unavailable)
+    with browser(tmp_path) as (page, errors):
+        page.evaluate("location.hash='library'")
+        page.locator(".library-filters button").click()
+        page.get_by_role("button", name="Search the Open Library catalogue instead").wait_for()
+        assert not page.evaluate("window.__requests.some(item=>item.args?.source==='openlibrary')")
+        page.get_by_role("button", name="Search the Open Library catalogue instead").click()
+        page.get_by_role("heading", name="Synthetic catalogue book").wait_for()
+        assert page.locator(".book-links a").count() == 0
+        assert page.get_by_role("button", name="Receive in chat").count() == 0
+        assert errors == []

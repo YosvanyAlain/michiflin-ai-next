@@ -37,3 +37,14 @@ Queued deliveries can resume only after the restored owner, chat and instance bi
 - No invitation, administrator address, provider credential or account log in a public job or artifact.
 
 Do not interpret a built `.xdc`, a restored account, or a green local test suite as approval to bypass the remaining gates.
+
+
+## Optional live mail validation
+
+The test creates two separate temporary accounts, never imports the production account, requires explicit opt-in, and stops mail IO when done. Keep its directory private. It does not grant any administrator role. Core protocol delivery is tested; it does not replace an actual miniapp interaction in a native client.
+
+```sh
+PYTHONPATH=src python tools/live_roundtrip.py --accept-create-test-accounts --directory /private/new-live-test
+```
+
+Use `--resume-test-accounts` only with the marked test directory to reuse those two accounts rather than creating more. Success verifies encrypted miniapp transport, a normal public-member handshake, the arithmetic request/response, and durable replay protection for note creation. Safe progress markers are printed; addresses, invitations and mailbox configuration are not printed.

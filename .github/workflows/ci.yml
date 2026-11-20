@@ -7,7 +7,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -15,8 +15,10 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -e '.[test,browser,bot]'
-      - run: python -m playwright install --with-deps chromium webkit
-      - run: ruff check src tests
+      - name: Install native browser engines
+        timeout-minutes: 6
+        run: python -m playwright install --with-deps chromium webkit
+      - run: ruff check src tests tools
       - run: python -m pytest -q
       - run: for source in miniapp/*.js miniapp/locales/*.js; do node --check "$source"; done
       - run: python -m michiflin.cli build

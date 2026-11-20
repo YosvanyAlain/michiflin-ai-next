@@ -285,5 +285,10 @@ window.MichiflinLocales.es = {
   "url_decode": "Codificación URL → Texto",
   "operation": "Operación",
   "try_catalogue": "Buscar en el catálogo de Open Library",
-  "service_daily_limit": "Se agotó el presupuesto diario de seguridad del servicio. Inténtalo cuando comience el siguiente día UTC."
+  "service_daily_limit": "Se agotó el presupuesto diario de seguridad del servicio. Inténtalo cuando comience el siguiente día UTC.",
+  "season_winter": "Invierno meteorológico",
+  "season_spring": "Primavera meteorológica",
+  "season_summer": "Verano meteorológico",
+  "season_autumn": "Otoño meteorológico",
+  "season_tropical": "Latitud tropical"
 };

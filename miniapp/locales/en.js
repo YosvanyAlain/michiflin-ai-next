@@ -285,5 +285,10 @@ window.MichiflinLocales.en = {
   "url_decode": "URL encoding → Text",
   "operation": "Operation",
   "try_catalogue": "Search the Open Library catalogue instead",
-  "service_daily_limit": "The service-wide daily safety budget is exhausted. Try again after the next UTC day begins."
+  "service_daily_limit": "The service-wide daily safety budget is exhausted. Try again after the next UTC day begins.",
+  "season_winter": "Meteorological winter",
+  "season_spring": "Meteorological spring",
+  "season_summer": "Meteorological summer",
+  "season_autumn": "Meteorological autumn",
+  "season_tropical": "Tropical latitude"
 };

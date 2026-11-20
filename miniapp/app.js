@@ -138,7 +138,8 @@
     renderWeather(result,latestWeather);
   };
   const weatherWidget=(data,compact=false)=>{
-    const widget=el("article",{class:"weather-widget","data-effect":data.effect,"aria-label":tr(data.effect)});
+    const stale=data.stale||Date.now()/1000-data.as_of>5400;
+    const widget=el("article",{class:"weather-widget","data-effect":data.effect,"data-season":data.season,"data-stale":String(!!stale),"aria-label":tr(data.effect)});
     const scene=el("div",{class:"weather-scene","aria-hidden":"true"});
     if(data.effect==="clear_day"||data.effect==="partly_cloudy")scene.append(el("span",{class:"weather-sun"}));
     if(data.effect==="clear_night")scene.append(el("span",{class:"weather-moon"}));
@@ -150,7 +151,9 @@
     if(data.effect==="thunderstorm")scene.append(el("span",{class:"lightning"}));
     const value=data.current?.temperature_2m;
     widget.append(scene,el("header",{class:"weather-location"},el("div",{},el("h2",{},data.place?.name||tr("weather")),el("p",{},data.place?[data.place.region,data.place.country].filter(Boolean).join(" · "):data.timezone)),icon("location")),el("div",{class:"weather-temperature"},typeof value==="number"?Math.round(value)+"°":"—"),el("div",{class:"weather-description"},tr(data.effect)),el("div",{class:"weather-source"},el("span",{},tr("model_data")),el("span",{},tr("updated")+" · "+M.date(data.as_of*1000))));
-    if(compact)widget.addEventListener("click",()=>navigate("weather"));
+    if(data.season)widget.append(el("span",{class:"weather-season"},tr("season_"+data.season)));
+    if(stale)widget.append(el("p",{class:"weather-stale"},tr("stale_weather")));
+    if(compact){widget.setAttribute("tabindex","0");widget.setAttribute("role","button");widget.addEventListener("click",()=>navigate("weather"));widget.addEventListener("keydown",event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();navigate("weather");}});}
     return widget;
   };
   const renderWeather=(node,data)=>{

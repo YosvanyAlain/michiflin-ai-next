@@ -32,7 +32,7 @@ This optional Linux x86-64 setup downloads roughly 515 MB. It binds to loopback 
 
 ## Not ready yet
 
-The Delta Chat adapter has native-core local tests, but production integration, final administrator provisioning, automated encrypted backup/restore, broader media workflows, and live-device release validation are still required. Provider configuration migration and the actual production identity restoration have been verified separately in private storage; neither is included in this repository. A browser test is not proof of delivery in Delta Chat. No runtime deployment workflow is enabled in this repository. The manual public-source diagnostic workflow contains no credentials and does not start a bot.
+The Delta Chat adapter has native-core local tests, but private deployment scheduling, final administrator provisioning, broader media workflows, and live-device release validation are still required. Authenticated snapshot/restore commands are implemented and tested, including a new-format production seed restored without mail IO. Provider configuration migration and the actual production identity restoration have been verified separately in private storage; neither is included in this repository. A browser test is not proof of delivery in Delta Chat. A real encrypted two-account mail roundtrip has also verified public-member arithmetic and replay-safe notes on separate temporary accounts, not the production mailbox. No runtime deployment workflow is enabled in this repository. The manual public-source diagnostic workflow contains no credentials and does not start a bot.
 
 ## Development
 
