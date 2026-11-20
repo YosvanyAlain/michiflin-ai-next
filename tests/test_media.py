@@ -93,3 +93,12 @@ def test_public_media_operation_never_uses_a_model_and_is_replay_safe(tmp_path):
     assert first['ok'] and first['data']['kind'] == 'youtube_metadata'
     assert service.handle(member, 42, request) == first
     assert service.media.client.get.call_count == 1
+
+
+def test_live_probe_uses_a_known_public_official_sample_not_a_retired_extractor_fixture(monkeypatch):
+    from michiflin.diagnostics import check_media
+
+    inspect = Mock(return_value={'source': 'YouTube oEmbed', 'download_available': False})
+    monkeypatch.setattr(Media, 'inspect', inspect)
+    assert check_media() == {'ok': True, 'source': 'YouTube oEmbed', 'metadata_only': True}
+    inspect.assert_called_once_with({'url': 'https://www.youtube.com/watch?v=aqz-KE-bpKQ'})

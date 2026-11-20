@@ -59,7 +59,7 @@ def check_reader() -> dict:
 
 def check_media() -> dict:
     try:
-        data = Media().inspect({"url": "https://www.youtube.com/watch?v=BaW_jenozKc"})
+        data = Media().inspect({"url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ"})
         return {"ok": True, "source": data["source"], "metadata_only": not data["download_available"]}
     except AppError as error:
         return {"ok": False, "error": error.code}
