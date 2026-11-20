@@ -372,3 +372,24 @@ def test_compact_catalogue_filters_search_and_keeps_tools_accessible(tmp_path, e
         page.locator(".usage-details summary").click()
         assert page.locator(".usage-details .caption").first.is_visible()
         assert errors == []
+
+
+@pytest.mark.parametrize("locale", ["en", "es"])
+def test_stale_catalogue_and_partial_verification_are_disclosed_together(tmp_path, monkeypatch, locale):
+    original = SourceFixture.get
+
+    def partial(self, url, params=None):
+        data = original(self, url, params)
+        return {**data, "catalog_stale": True, "partial_results": True}
+
+    monkeypatch.setattr(SourceFixture, "get", partial)
+    with browser(tmp_path, locale) as (page, errors):
+        page.evaluate("location.hash='library'")
+        page.locator('.library-filters button').click()
+        page.locator('.book-card').wait_for()
+        notices = page.locator('#library-results > p[role="status"]')
+        assert notices.count() == 2
+        for key in ['catalog_stale', 'catalog_partial']:
+            text = page.evaluate('(key)=>Michiflin.tr(key)', key)
+            assert text in notices.all_inner_texts()
+        assert errors == []

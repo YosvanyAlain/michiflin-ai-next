@@ -107,7 +107,8 @@
     if(!node)return;
     if(!data){fill(node,empty("books_title","books_body","library"));return;}
     fill(node,el("div",{class:"library-notice"},tr(data.notice)));
-    if(data.catalog_stale||data.partial_results)node.append(el("p",{class:"caption",role:"status"},tr(data.partial_results?"catalog_partial":"catalog_stale")));
+    if(data.catalog_stale)node.append(el("p",{class:"caption",role:"status"},tr("catalog_stale")));
+    if(data.partial_results)node.append(el("p",{class:"caption",role:"status"},tr("catalog_partial")));
     if(!data.books?.length)node.append(el("div",{class:"empty-state"},icon("library"),el("p",{},tr("no_results"))));
     const grid=el("div",{class:"book-grid"});
     for(const book of data.books||[]){
