@@ -28,9 +28,9 @@ The compact interface keeps the new typography, palette, illustration, themes an
 | PDF/OCR, screenshots and broader conversion | Not implemented | Resource-isolated workers, format validation and actual output tests |
 | Coding workspace and miniapp export | Not implemented | No host shell or secrets, isolated execution, package validation and explicit export |
 | Remote files, selective extraction and rename undo | Not implemented | Identity-bound storage, transactions, traversal/bomb/symlink defenses and restore tests |
-| Split transfer/checksums and fair worker queue | Not implemented as a general transfer service | Mailbox-aware part budgets, safe joining, cancellation and crash/replay tests |
+| Split transfer/checksums and fair worker queue | Durable queue/offline sandbox foundations implemented; not a general transfer service | Complete module integration, mailbox-aware part budgets, safe joining and encrypted multipart delivery |
 
-Isolated media extraction/download and web search are the next connected priorities. The safe text reader is now a real connected operation, not a placeholder. They are not replaced by cosmetic cards. No unavailable service is added to the executable catalogue merely to resemble the previous miniapp.
+The approved dependency-ordered implementation is tracked in [IMPLEMENTATION.md](IMPLEMENTATION.md), starting with durable jobs before transfers, files, archives, media and the remaining modules. Queue and offline isolation boundaries are documented in [JOBS.md](JOBS.md). Isolated media extraction/download and web search remain connected priorities after their infrastructure dependencies. The safe text reader is now a real connected operation, not a placeholder. They are not replaced by cosmetic cards. No unavailable service is added to the executable catalogue merely to resemble the previous miniapp.
 
 ## WARP adaptation
 

@@ -175,6 +175,9 @@ class Ledger:
         with self.transaction() as db:
             db.execute("UPDATE requests SET state='uncertain',updated=? WHERE state='running'", (time.time(),))
             db.execute("UPDATE outbox SET state='uncertain' WHERE state='sending'")
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='jobs'").fetchone():
+                db.execute("UPDATE jobs SET state='uncertain',updated=?,error='job_outcome_uncertain' "
+                           "WHERE state IN ('running','pausing','cancelling')", (time.time(),))
 
     def has_instance(self, instance: int) -> bool:
         with self.connection() as db:

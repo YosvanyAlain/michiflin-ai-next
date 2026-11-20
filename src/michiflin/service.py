@@ -12,6 +12,7 @@ from .config import Settings
 from .errors import AppError
 from .gutenberg import GutenbergClient
 from .identity import Principal
+from .jobs import JobQueue
 from .media import Media
 from .models import ModelGateway
 from .network import JsonClient
@@ -30,6 +31,7 @@ class Service:
     def __init__(self, settings: Settings, client: JsonClient | None = None) -> None:
         self.settings = settings
         self.ledger = Ledger(settings.state_dir)
+        self.jobs = JobQueue(self.ledger)
         self.client = client or JsonClient(contact=settings.contact)
         self.books = GutenbergClient(settings.state_dir / "catalog") if client is None else client
         self.models = ModelGateway(settings)
@@ -38,6 +40,12 @@ class Service:
         self.session = secrets.token_urlsafe(24)
         self.started = time.monotonic()
         self.operations = {
+            "jobs.list": Operation(lambda p, _a, _l, instance: self.jobs.list(
+                p.storage_key, p.chat_id, instance), instance=True),
+            "jobs.status": Operation(lambda p, args, _l, instance: self.jobs.get(
+                p.storage_key, p.chat_id, instance, args.get("id")), instance=True),
+            "jobs.control": Operation(lambda p, args, _l, instance: self.jobs.control(
+                p.storage_key, p.chat_id, instance, args.get("id"), args.get("action")), instance=True),
             "library.search": Operation(lambda _p, args, _l: library.search(self.books if args.get("source", "gutenberg") == "gutenberg" else self.client, library.BookQuery.parse(args))),
             "library.deliver": Operation(lambda p, args, _l, instance: downloads.prepare(
                 self.books, self.ledger, settings.state_dir / "deliveries", p, instance, args), instance=True),

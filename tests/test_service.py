@@ -217,3 +217,30 @@ def test_atomic_note_cannot_mutate_a_different_reserved_request(service, member)
     with pytest.raises(AppError, match="request_checkpoint_failed"):
         service.ledger.complete_note(42, "atomic-bound-0001", member.storage_key, "notes.add", {"text": "Changed note"})
     assert not service.ledger.notes(member.storage_key)
+
+
+def test_jobs_operations_bind_to_authenticated_owner_chat_and_instance(service, member):
+    from michiflin.jobs import Kind
+
+    service.jobs.kinds = {"synthetic.v1": Kind(lambda _payload: None)}
+    job = service.jobs.enqueue(member.storage_key, member.chat_id, 42, "synthetic-job-0001", "synthetic.v1", {})
+    listed = service.handle(member, 42, request(service, "jobs.list", {}))
+    assert listed["ok"] and listed["data"]["jobs"][0]["id"] == job["id"]
+    status = service.handle(member, 42, request(service, "jobs.status", {"id": job["id"]}, "synthetic-status-0001"))
+    assert status["ok"] and status["data"]["state"] == "queued"
+    service.register_instance(member, 43)
+    denied = service.handle(member, 43, request(service, "jobs.status", {"id": job["id"]}, "synthetic-status-0002"))
+    assert denied["error"] == "job_not_found"
+    cancelled = service.handle(member, 42, request(service, "jobs.control", {"id": job["id"], "action": "cancel"}, "synthetic-cancel-0001"))
+    assert cancelled["ok"] and cancelled["data"]["state"] == "cancelled"
+    assert "jobs.submit" not in service.operations
+    assert "jobs.reconcile" not in service.operations
+
+
+def test_job_controls_retain_existing_encryption_and_session_gates(service, member):
+    for op in ("jobs.list", "jobs.status", "jobs.control"):
+        response = service.handle(replace(member, encrypted=False), 42, request(service, op))
+        assert not response["ok"]
+        value = request(service, op)
+        value["session"] = "stale"
+        assert service.handle(member, 42, value)["error"] == "session_changed"
