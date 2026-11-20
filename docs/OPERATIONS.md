@@ -74,3 +74,15 @@ Snapshot history and original seeds are retained; this supervisor never deletes 
 The current package was opened from an actual attached miniapp message in an isolated Delta Chat Desktop 2.69.1 profile using a synthetic `.invalid` account, never the production identity. The native webxdc window emitted a real handshake status update without an injected transport or backend response. Offline `17 * 23 = 391`, the Spanish locale switch, dark preferences, all thirteen utility cards and local password generation were exercised with no miniapp renderer error. The unconfirmed bot-connection state remained honest. This complements, but does not replace, the separate encrypted two-account mail roundtrip.
 
 The supervisor's native regression additionally runs a synthetic runtime, stops it normally, acquires its released lock, snapshots its identity/workspace, restores them, and starts and stops the restored runtime. No production mail account is used by this regression.
+
+
+## Local multimedia native validation
+
+The expanded sixteen-card package has also been exercised in a fresh synthetic Delta Chat Desktop profile. Native tests opened the actual webxdc window, generated a WAV preview, detected an unsafe ZIP path, protected a CSV formula and invoked the real native export destination dialog. The destination picker was cancelled without selecting a recipient. No fake webxdc bridge, model response or production identity was used for that UI check. Export dialog success is not a file-delivery receipt. The checks supplement, rather than replace, encrypted transport and deployment validation.
+
+
+## Cooperative native shutdown
+
+The runtime owns its native event loop directly. SIGINT and SIGTERM set a stop flag instead of raising asynchronous exceptions inside RPC calls. A bounded 256-event queue applies backpressure, and events from any other account are ignored. The native core inherits the private supervisor process group so a forced group shutdown cannot intentionally leave a detached native core behind.
+
+Shutdown waits for the selected account's `stop_io` acknowledgement, closes the request writer and bounds native-process exit. A native reader may still have an outstanding `get_next_event` request; that does not justify an unlimited wait. Failure to acknowledge IO shutdown is reported as unclean and the core is killed before restoration or snapshot access. The supervisor allows a bounded 180-second cleanup window covering an in-flight model request and native shutdown. A nonzero runtime exit still gets an authenticated recovery checkpoint, but does not produce a successful runtime-session job.

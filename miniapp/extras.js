@@ -43,10 +43,14 @@
   const validateImage=buffer=>{const [width,height]=dimensions(buffer);if(width<1||height<1||width>16000||height>16000||width*height>16000000)throw new Error("image_limit");return [width,height];};
   const view=id=>{
     const panel=el("section",{class:"tool-workbench"}),output=el("div",{class:"tool-output",role:"status",hidden:true});
-    let resource=null,disposed=false;
+    const scope=M.files.scope();let resource=null,disposed=false,busy=false;
     document.addEventListener("michiflin:navigate",()=>{disposed=true;if(resource)URL.revokeObjectURL(resource);},{once:true});
     const show=value=>{if(resource){URL.revokeObjectURL(resource);resource=null;}output.hidden=false;fill(output,el("pre",{},value),button("copy",()=>M.copy(String(value)),"text","copy"));};
-    const safe=fn=>async()=>{try{await fn();}catch(error){M.notify(tr(error.message in window.MichiflinLocales.en?error.message:"file_error"));}};
+    const safe=fn=>async event=>{
+      if(busy||disposed)return;busy=true;const control=event.currentTarget;control.disabled=true;scope.cancel();const active=scope.current();panel.setAttribute("aria-busy","true");
+      try{await fn(active);}catch(error){if(active())M.notify(tr(error.message in window.MichiflinLocales.en?error.message:"file_error"));}
+      finally{busy=false;if(!disposed){control.disabled=false;panel.setAttribute("aria-busy","false");}}
+    };
     panel.append(el("p",{class:"privacy-note"},tr("local_file_privacy")));
     if(id==="finance"){
       const principal=el("input",{type:"number",min:0,value:1000}),monthly=el("input",{type:"number",min:0,value:50}),rate=el("input",{type:"number",min:0,max:100,value:4,step:"any"}),years=el("input",{type:"number",min:1,max:80,value:10});
@@ -66,31 +70,31 @@
     }
     if(id==="file_inspector"||id==="image_lab"){
       const file=el("input",{type:"file",accept:id==="image_lab"?"image/jpeg,image/png":undefined});
-      file.onchange=()=>{output.hidden=true;if(resource){URL.revokeObjectURL(resource);resource=null;}};
+      file.onchange=()=>{scope.cancel();output.hidden=true;if(resource){URL.revokeObjectURL(resource);resource=null;}};
       const selected=()=>{const value=file.files?.[0];if(!value)throw new Error("choose_file");if(value.size>fileLimit)throw new Error("file_limit");return value;};
       panel.append(input("choose_file",file));
-      if(id==="file_inspector")panel.append(button("inspect_file",safe(async()=>{
+      if(id==="file_inspector")panel.append(button("inspect_file",safe(async active=>{
         const value=selected(),digest=await crypto.subtle.digest("SHA-256",await value.arrayBuffer());
-        show(value.name+"\n"+tr("file_size")+": "+value.size+" B\n"+tr("file_type")+": "+(value.type||tr("unknown"))+"\nSHA-256\n"+Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,"0")).join(""));
+        if(!active())return;show(value.name+"\n"+tr("file_size")+": "+value.size+" B\n"+tr("file_type")+": "+(value.type||tr("unknown"))+"\nSHA-256\n"+Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,"0")).join(""));
       }),"primary","shield"));
       else{
         const edge=el("input",{type:"number",min:64,max:4096,value:1600}),quality=el("input",{type:"number",min:30,max:95,value:80});
-        panel.append(el("div",{class:"field-row"},input("max_edge",edge),input("image_quality",quality)),el("p",{class:"caption"},tr("image_notice")),button("optimize_image",safe(async()=>{
+        panel.append(el("div",{class:"field-row"},input("max_edge",edge),input("image_quality",quality)),el("p",{class:"caption"},tr("image_notice")),button("optimize_image",safe(async active=>{
           const value=selected(),size=Number(edge.value),compression=Number(quality.value);
           if(!Number.isInteger(size)||size<64||size>4096||!Number.isFinite(compression)||compression<30||compression>95)throw new Error("invalid_image_options");
           validateImage(await value.arrayBuffer());
           const temporary=URL.createObjectURL(value),image=new Image();
           try{
-            image.src=temporary;await image.decode();
+            image.src=temporary;await image.decode();if(!active())return;
             if(image.naturalWidth*image.naturalHeight>16000000)throw new Error("image_limit");
             const factor=Math.min(1,size/Math.max(image.naturalWidth,image.naturalHeight)),canvas=document.createElement("canvas");
             canvas.width=Math.max(1,Math.round(image.naturalWidth*factor));canvas.height=Math.max(1,Math.round(image.naturalHeight*factor));
             const context=canvas.getContext("2d");if(!context)throw new Error("invalid_image");context.fillStyle="#fff";context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(image,0,0,canvas.width,canvas.height);
             const blob=await new Promise(resolve=>canvas.toBlob(resolve,"image/jpeg",compression/100));
-            if(disposed)return;
+            if(disposed||!active())return;
             if(!blob)throw new Error("invalid_image");
             if(resource)URL.revokeObjectURL(resource);resource=URL.createObjectURL(blob);output.hidden=false;
-            fill(output,el("img",{src:resource,alt:tr("image_preview"),style:"max-width:100%;max-height:260px;object-fit:contain"}),el("p",{},canvas.width+" × "+canvas.height+" · "+blob.size+" B"),el("a",{href:resource,download:"michiflin-image.jpg",class:"button primary"},tr("save_image")));
+            fill(output,el("img",{src:resource,alt:tr("image_preview"),style:"max-width:100%;max-height:260px;object-fit:contain"}),el("p",{},canvas.width+" × "+canvas.height+" · "+blob.size+" B"),scope.exportControl(blob,"michiflin-image.jpg","save_image"));
           }finally{URL.revokeObjectURL(temporary);}
         }),"primary","utilities"));
       }

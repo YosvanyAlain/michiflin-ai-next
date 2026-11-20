@@ -13,3 +13,6 @@
 
 .weather-season{position:relative;display:inline-block;margin-top:12px;border:1px solid #ffffff50;border-radius:30px;padding:4px 10px;font-size:11px}.weather-stale{position:relative;font-size:11px;line-height:1.5;max-width:90%;margin:10px 0 0}.weather-widget[data-stale="true"] .weather-scene *{animation-play-state:paused!important}.weather-widget[data-season="winter"][data-effect="clear_day"]{background:linear-gradient(135deg,#527fbb,#8397c8)}.weather-widget[data-season="autumn"][data-effect="clear_day"]{background:linear-gradient(135deg,#a06c63,#ac8f95)}
 @media(max-width:560px){.library-filters{grid-template-columns:minmax(0,1fr)}}
+
+.tool-workbench input[type="checkbox"]{width:1.2rem;height:1.2rem;justify-self:start;accent-color:var(--accent,#a79ae0)}
+.tool-output pre{overflow-wrap:anywhere;white-space:pre-wrap}

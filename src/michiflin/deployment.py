@@ -155,7 +155,7 @@ def run_bounded(runtime: Path, config: dict, duration: int, source: Path) -> int
             return process.wait(timeout=duration)
         except subprocess.TimeoutExpired:
             process.send_signal(signal.SIGINT)
-            return process.wait(timeout=120)
+            return process.wait(timeout=180)
     finally:
         if process.poll() is None:
             os.killpg(process.pid, signal.SIGKILL)
@@ -241,6 +241,8 @@ def execute(*, validate_only: bool, duration: int, directory: Path, source: Path
             else:
                 manifest = checkpoint(store, release, runtime, work, passphrase, stem, revision)
             completed = True
+            if not validate_only and result != 0:
+                raise RuntimeError("The runtime failed; its latest state was nevertheless verified and preserved")
             print("Private snapshot authenticated, uploaded, downloaded and independently restored. No identity details were logged.", flush=True)
             return {"validated": True, "io_started": not validate_only, "checkpoint": manifest}
 

@@ -7,7 +7,7 @@ A new bilingual workspace for Delta Chat: thoughtful local utilities, an ebook d
 ## Implemented foundations
 
 - An independent, responsive miniapp with English and Spanish interfaces, light/dark themes, accessible navigation, and reduced-motion support.
-- Thirteen utility cards: offline arithmetic, dimensional unit conversion, text tools, device-only passwords, JSON, world clocks, notes, savings projections, date differences, Unicode/Base64/URL encoding, local file checksums, private image optimization, and connected weather.
+- Sixteen utility cards: offline arithmetic, dimensional unit conversion, text tools, device-only passwords, JSON, world clocks, notes, savings projections, date differences, Unicode/Base64/URL encoding, local file checksums, private image optimization, CSV/JSON table conversion, ZIP/EPUB metadata inspection, PCM WAV editing, and connected weather.
 - Project Gutenberg discovery through Gutendex, with title, writer, subject, language, and verified format filters. Open Library is a separate catalogue/loan source, never advertised as a guaranteed download.
 - Open-Meteo place disambiguation, modelled conditions, hourly forecasts, seven-day forecasts, and condition-driven weather effects. Saved or old data is not described as a live observation.
 - A transport-independent service layer with sender-and-key-bound instances, a durable request ledger, request identity checks, public-user quotas, and fail-closed administrator permissions.
@@ -32,7 +32,19 @@ This optional Linux x86-64 setup downloads roughly 515 MB. It binds to loopback 
 
 ## Not ready yet
 
-The Delta Chat adapter has native-core local tests, but private deployment scheduling, final administrator provisioning, broader media workflows, and live-device release validation are still required. Authenticated snapshot/restore commands are implemented and tested, including a new-format production seed restored without mail IO. Provider configuration migration and the actual production identity restoration have been verified separately in private storage; neither is included in this repository. A browser test is not proof of delivery in Delta Chat. A real encrypted two-account mail roundtrip has also verified public-member arithmetic and replay-safe notes on separate temporary accounts, not the production mailbox. No runtime deployment workflow is enabled in this repository. The manual public-source diagnostic workflow contains no credentials and does not start a bot.
+The private session supervisor, authenticated shutdown checkpoints and restored restart path are implemented and tested. Private backup validation has uploaded, downloaded and independently restored the real encrypted identity without starting production mail IO. An isolated synthetic profile has also opened the actual miniapp in Delta Chat Desktop and exercised offline tools, bilingual preferences and native file-export selection. Separately, a real encrypted two-account mail roundtrip verified public-member arithmetic and replay-safe notes on temporary accounts, not the production mailbox.
+
+Production remains stopped. Two requested administrator identities still require verified cryptographic pairing; actual Gutenberg downloads remain unavailable during upstream maintenance, and the legacy hosting platform has an orphan queued-run inconsistency. Broader server-side media conversion, arbitrary platform downloads and archive extraction are **not** implemented by the local file tools. No runtime deployment workflow is enabled in this public repository. No built package or browser fixture is presented as a deployed production service.
+
+## Local files and audio
+
+- Table lab handles quoted CSV, Unicode and JSON row arrays, with formula-injection protection enabled on CSV exports.
+- Archive lens reads bounded ZIP/EPUB metadata, flags unsafe paths, symbolic links, duplicate names and suspicious expansion, and never extracts or executes content. It is not a virus scan or an integrity certificate.
+- WAV atelier produces actual 16-bit PCM clips with optional peak normalization and edge fades. It supports mono/stereo WAV only, not MP3, AAC or video transcoding.
+- File fingerprints, optimized images, table contents, archive inventories and audio samples stay local. User-selected inputs do not enter model prompts, bot status updates, activity history or local storage.
+- Exporting inside a compatible Delta Chat client uses the native `sendToChat()` file API only after an explicit button click. The client controls recipient selection and subsequent sending; the miniapp never claims a delivery receipt. Standalone browsers offer a local download instead.
+
+See [file-tool limits](docs/FILE_TOOLS.md) for exact supported formats and boundaries.
 
 ## Development
 

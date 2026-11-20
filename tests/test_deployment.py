@@ -101,6 +101,7 @@ def test_shutdown_waits_for_runtime_before_backup_and_excludes_backup_secrets(tm
     result = deployment.run_bounded(tmp_path, {"admin_keys": {}, "providers": []}, 1, tmp_path)
     assert result == 0
     process.send_signal.assert_called_once_with(signal.SIGINT)
+    assert process.wait.call_args.kwargs["timeout"] == 180
     environment = start.call_args.kwargs["env"]
     assert not any("BACKUP" in key or "GITHUB" in key for key in environment)
     assert environment["LD_LIBRARY_PATH"] == "/synthetic/python/lib"
@@ -111,7 +112,7 @@ def test_unresponsive_runtime_is_killed_as_a_group_before_checkpoint(tmp_path, m
     process = Mock()
     process.pid = 12345
     process.wait.side_effect = [subprocess.TimeoutExpired("synthetic", 1),
-                                subprocess.TimeoutExpired("synthetic", 120), -9]
+                                subprocess.TimeoutExpired("synthetic", 180), -9]
     process.poll.return_value = None
     monkeypatch.setattr(deployment.subprocess, "Popen", Mock(return_value=process))
     kill = Mock()
@@ -129,7 +130,7 @@ def test_failed_live_checkpoint_preserves_private_state_and_blocks_restart(tmp_p
     _execute_fixture(tmp_path, monkeypatch, validate_only=False, fail_checkpoint=True)
 
 
-def _execute_fixture(tmp_path, monkeypatch, *, validate_only, fail_checkpoint=False):
+def _execute_fixture(tmp_path, monkeypatch, *, validate_only, fail_checkpoint=False, runtime_exit=0):
     revision = "a" * 40
     config = {"providers": [{"id": "synthetic"}], "admin_keys": {"synthetic": "b" * 40},
               "backup_passphrase": "private-passphrase-" * 3}
@@ -143,7 +144,7 @@ def _execute_fixture(tmp_path, monkeypatch, *, validate_only, fail_checkpoint=Fa
     monkeypatch.setattr(deployment, "PrivateStore", lambda *_: store)
     monkeypatch.setattr(deployment, "checksum", lambda *_: "a" * 64)
     monkeypatch.setattr(deployment, "restore", lambda _snapshot, destination, _key: destination.mkdir())
-    run = Mock(return_value=0)
+    run = Mock(return_value=runtime_exit)
     checkpoint = Mock(side_effect=ValueError("synthetic backup failure")) if fail_checkpoint else Mock(return_value=SEED)
     monkeypatch.setattr(deployment, "run_bounded", run)
     monkeypatch.setattr(deployment, "checkpoint", checkpoint)
@@ -152,6 +153,10 @@ def _execute_fixture(tmp_path, monkeypatch, *, validate_only, fail_checkpoint=Fa
             deployment.execute(validate_only=validate_only, duration=1, directory=tmp_path, source=tmp_path)
         assert list(tmp_path.glob("next-session-*/runtime"))
         assert store.upload.call_args.args[1].name.endswith(".running.json")
+    elif runtime_exit:
+        with pytest.raises(RuntimeError, match="latest state was nevertheless verified"):
+            deployment.execute(validate_only=False, duration=1, directory=tmp_path, source=tmp_path)
+        assert not list(tmp_path.glob("next-session-*"))
     else:
         result = deployment.execute(validate_only=validate_only, duration=1, directory=tmp_path, source=tmp_path)
         assert result["io_started"] is False
@@ -197,3 +202,7 @@ def test_real_synthetic_runtime_shutdown_and_restored_restart(tmp_path):
     assert deployment.run_bounded(restored, config, 1, source) == 0
     with (restored / "state" / "runtime.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def test_nonzero_runtime_exit_preserves_checkpoint_but_does_not_claim_success(tmp_path, monkeypatch):
+    _execute_fixture(tmp_path, monkeypatch, validate_only=False, runtime_exit=1)

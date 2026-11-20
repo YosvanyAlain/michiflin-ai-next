@@ -12,6 +12,7 @@
     ["weather","",false],["notes","peach",true],
     ["finance","mint",true],["date_math","peach",true],["encoding","",true],
     ["file_inspector","mint",true],["image_lab","peach",true],
+    ["csv_lab","mint",true],["zip_inspector","",true],["audio_lab","peach",true],
   ];
   const pageHeading=(title,body)=>el("header",{class:"page-heading"},el("h1",{},tr(title)),el("p",{},tr(body)));
   const remoteButton=(key,action,style="primary",glyph="arrow")=>{const control=button(key,action,style,glyph);control.dataset.remote="true";control.disabled=!M.transport.ready;return control;};
@@ -67,7 +68,7 @@
   };
   const tool=()=>{
     if(!utilities.some(([id])=>id===route)){navigate("home");return;}
-    content.append(button("utilities",()=>navigate("utilities"),"text back-button","arrow"),pageHeading(route,route+"_desc"),(["finance","date_math","encoding","file_inspector","image_lab"].includes(route)?M.extras:M.offline).view(route));
+    content.append(button("utilities",()=>navigate("utilities"),"text back-button","arrow"),pageHeading(route,route+"_desc"),(["csv_lab","zip_inspector","audio_lab"].includes(route)?M.filetools:["finance","date_math","encoding","file_inspector","image_lab"].includes(route)?M.extras:M.offline).view(route));
   };
   const library=()=>{
     content.append(pageHeading("library_title","library_body"));
