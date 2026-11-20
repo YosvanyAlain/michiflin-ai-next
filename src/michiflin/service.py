@@ -5,6 +5,7 @@ import binascii
 import json
 import re
 import secrets
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -14,14 +15,17 @@ from . import __version__, downloads, library, utilities, weather
 from .artifacts import ArtifactStore
 from .config import Settings
 from .errors import AppError
+from .file_jobs import CHECKSUM_HANDLER, CHECKSUM_KIND
 from .gutenberg import GutenbergClient
 from .identity import Principal
+from .job_runner import OfflineRunner
 from .jobs import JobQueue
 from .media import Media
 from .models import ModelGateway
 from .network import JsonClient
 from .reader import Reader
 from .storage import Ledger
+from .workers import WorkerPool
 
 
 @dataclass(frozen=True)
@@ -37,6 +41,7 @@ class Service:
         self.settings = settings
         self.ledger = Ledger(settings.state_dir)
         self.jobs = JobQueue(self.ledger)
+        self.workers: WorkerPool | None = None
         self.artifacts = ArtifactStore(self.ledger)
         self.client = client or JsonClient(contact=settings.contact)
         self.books = GutenbergClient(settings.state_dir / "catalog") if client is None else client
@@ -80,6 +85,40 @@ class Service:
                 local_only=args.get("local_only") is True, use_tools=args.get("use_tools") is True, locale=locale)),
             "admin.health": Operation(lambda _p, _a, _l: {"version": __version__, "uptime": round(time.monotonic() - self.started), "public_access": self.settings.public_access}, admin=True),
         }
+
+    def start_workers(self, stop: threading.Event) -> WorkerPool | None:
+        """Runtime-only setup after exclusive locking/recovery; never called by a member operation."""
+        if self.workers is not None:
+            raise AppError("job_workers_already_started")
+        if stop.is_set():
+            return None
+        self.jobs.kinds = {CHECKSUM_KIND: CHECKSUM_HANDLER.kind}
+        try:
+            runner = OfflineRunner(self.jobs, {CHECKSUM_KIND: CHECKSUM_HANDLER}, artifacts=self.artifacts)
+        except AppError as error:
+            self.jobs.kinds = {}
+            if error.code == "sandbox_unavailable":
+                return None
+            raise
+        pool = WorkerPool(runner, stop)
+        if not pool.start():
+            self.jobs.kinds = {}
+            return None
+        self.workers = pool
+        self.operations["files.checksum"] = Operation(lambda p, args, _l, instance, request_id: self.queue_checksum(
+            p, instance, request_id, args), request_id=True)
+        return pool
+
+    def queue_checksum(self, principal: Principal, instance: int, request_id: str, args: dict) -> dict:
+        if self.workers is None or not self.workers.healthy():
+            raise AppError("job_workers_unavailable")
+        if set(args) != {"id"}:
+            raise AppError("invalid_checksum_job")
+        artifact = self.artifacts.get(principal.storage_key, principal.chat_id, instance, args["id"])
+        if artifact["state"] != "ready":
+            raise AppError("artifact_not_ready")
+        return self.jobs.enqueue(principal.storage_key, principal.chat_id, instance, request_id,
+                                 CHECKSUM_KIND, {"artifact": artifact["id"]})
 
     def import_attachment(self, principal: Principal, instance: int, message_id: int, name: str, source: Path) -> dict:
         principal.require_access(self.settings)

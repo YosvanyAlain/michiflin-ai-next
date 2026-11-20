@@ -132,12 +132,12 @@
       fill(output);output.hidden=true;
     };
     document.addEventListener("michiflin:navigate",reset,{once:true});
-    const action=(key,run)=>{
+    const action=(key,run,enabled=()=>true)=>{
       const control=button(key,async()=>{
-        if(busy||scope.disposed)return;busy=true;control.disabled=true;panel.setAttribute("aria-busy","true");reset();const active=scope.current();
+        if(busy||scope.disposed||!enabled())return;busy=true;control.disabled=true;panel.setAttribute("aria-busy","true");reset();const active=scope.current();
         try{await run(active);}catch(error){if(active())M.notify(tr(error.message in window.MichiflinLocales.en?error.message:"file_error"));}
-        finally{busy=false;if(!scope.disposed){control.disabled=false;panel.setAttribute("aria-busy","false");}}
-      },"primary","utilities");return control;
+        finally{busy=false;if(!scope.disposed){control.disabled=!enabled();panel.setAttribute("aria-busy","false");}}
+      },"primary","utilities");control.disabled=!enabled();return control;
     };
     const show=(value,blob,name)=>{output.hidden=false;fill(output,el("pre",{},value.slice(0,24000)),value.length>24000?el("p",{class:"caption"},tr("preview_limited")):null,scope.exportControl(blob,name));};
     if(id==="csv_lab"){
@@ -153,15 +153,17 @@
         action("json_to_csv",active=>{let rows;try{rows=JSON.parse(source.value);}catch{throw new Error("csv_invalid");}const text=writeCsv(rows,delimiter.value,protect.checked);if(active())show(text,new Blob(["\uFEFF",text],{type:"text/csv;charset=utf-8"}),"michiflin-table.csv");})));
     }
     if(id==="zip_inspector"){
-      const file=el("input",{type:"file",accept:".zip,.epub,application/zip,application/epub+zip"});file.onchange=reset;
-      panel.append(input("choose_file",file),el("p",{class:"caption"},tr("zip_notice")),action("inspect_archive",async active=>{
+      const file=el("input",{type:"file",accept:".zip,.epub,application/zip,application/epub+zip"});
+      const inspect=action("inspect_archive",async active=>{
         const selected=file.files?.[0];if(!selected)throw new Error("choose_file");if(selected.size>M.files.limit)throw new Error("file_limit");
         const report=inspectZip(await selected.arrayBuffer());if(!active())return;
         const warnings=report.entries.filter(entry=>entry.warnings.length).length;
         const summary=tr("zip_entries")+": "+report.entries.length+"\n"+tr("zip_declared")+": "+report.declared_bytes+" B\n"+tr("zip_flags")+": "+warnings+(report.expansion_warning?"\n"+tr("zip_expansion"):"");
         const lines=report.entries.slice(0,150).map(entry=>entry.name+" · "+entry.uncompressed_bytes+" B"+(entry.warnings.length?"\n  "+entry.warnings.map(tr).join("; "):""));
         show(summary+"\n\n"+lines.join("\n")+(report.entries.length>150?"\n"+tr("preview_limited"):""),new Blob([JSON.stringify(report,null,2)],{type:"application/json"}),"michiflin-archive.json");
-      }));
+      },()=>!!file.files?.length);
+      file.onchange=()=>{reset();inspect.disabled=busy||!file.files?.length;};
+      panel.append(input("choose_file",file),el("p",{class:"caption"},tr("zip_notice")),inspect);
     }
     if(id==="audio_lab"){
       const file=el("input",{type:"file",accept:".wav,audio/wav,audio/x-wav"}),from=el("input",{type:"number",min:0,step:"0.001",value:0}),to=el("input",{type:"number",min:0,step:"0.001",value:1}),fade=el("input",{type:"number",min:0,max:1000,value:10}),normalize=el("input",{type:"checkbox"}),details=el("p",{class:"caption",role:"status"});

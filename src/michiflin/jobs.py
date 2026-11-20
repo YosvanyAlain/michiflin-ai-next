@@ -358,8 +358,9 @@ class JobQueue:
     def list(self, owner: str, chat: int, instance: int) -> dict:
         with self.ledger.connection() as db:
             self._binding(db, instance, owner, chat)
-            rows = db.execute("SELECT * FROM jobs WHERE owner=? AND chat=? AND instance=? ORDER BY created DESC,id LIMIT 50",
-                              (owner, chat, instance)).fetchall()
+            rows = db.execute("SELECT * FROM jobs WHERE owner=? AND chat=? AND instance=? "
+                              "ORDER BY (state IN ('queued','running','pausing','cancelling','paused','uncertain')) DESC,"
+                              "created DESC,id LIMIT 50", (owner, chat, instance)).fetchall()
             return {"jobs": [self._public(row) for row in rows]}
 
     def control(self, owner: str, chat: int, instance: int, identifier: object, action: object) -> dict:

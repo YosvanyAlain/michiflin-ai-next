@@ -87,7 +87,7 @@ def serve(config_dir: Path, source: Path, stop: threading.Event, settings: Setti
         transport = IOTransport(accounts_dir=str(config_dir / "accounts"), stderr=subprocess.DEVNULL,
                                 process_group=None)
         transport.start()
-        account = None
+        account, workers = None, None
         try:
             rpc = Rpc(transport)
             accounts = rpc.get_all_account_ids()
@@ -97,6 +97,8 @@ def serve(config_dir: Path, source: Path, stop: threading.Event, settings: Setti
             account = accounts[0]
             service = Service(settings)
             service.ledger.recover_interrupted()
+            if not stop.is_set():
+                workers = service.start_workers(stop)
             package = build(source, settings.state_dir / "packages")
             adapter = DeltaAdapter(rpc, account, service, package)
             incoming: queue.Queue = queue.Queue(maxsize=256)
@@ -116,12 +118,16 @@ def serve(config_dir: Path, source: Path, stop: threading.Event, settings: Setti
                     if not stop.is_set():
                         reader_failed.set()
 
+            if workers is not None:
+                workers.check()
             if not stop.is_set():
                 adapter.resume_deliveries()
             if not stop.is_set():
                 threading.Thread(target=read, daemon=True).start()
                 rpc.start_io(account)
             while not stop.is_set():
+                if workers is not None:
+                    workers.check()
                 if reader_failed.is_set():
                     raise RuntimeError("The native event reader stopped unexpectedly")
                 try:
@@ -132,7 +138,11 @@ def serve(config_dir: Path, source: Path, stop: threading.Event, settings: Setti
                     dispatch(adapter, rpc, account, event)
         finally:
             stop.set()
-            close_transport(transport, account)
+            try:
+                if workers is not None:
+                    workers.close()
+            finally:
+                close_transport(transport, account)
 
 
 def main() -> None:

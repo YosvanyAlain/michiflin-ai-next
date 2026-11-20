@@ -1,6 +1,6 @@
 # Local file tools
 
-These tools run inside the miniapp. Files must be selected by the user and are not uploaded to the bot or an AI provider. Inputs and generated file contents are not saved in activity history or local storage. Navigating away releases preview URLs; changing inputs invalidates pending reads and generated exports.
+These tools run inside the miniapp. Files must be selected by the user and are not uploaded to the bot or an AI provider. Inputs and generated file contents are not saved in activity history or local storage. Navigating away releases preview URLs; changing inputs invalidates pending reads and generated exports. Archive inspection stays disabled until the file-selection change event is processed, including delayed browser events, and becomes disabled again when that selection is cleared. Selecting the archive never starts inspection automatically.
 
 ## Exports
 

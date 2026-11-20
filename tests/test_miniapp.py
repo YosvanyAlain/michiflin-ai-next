@@ -44,7 +44,7 @@ class SourceFixture:
 
 
 @contextmanager
-def browser(tmp_path, locale="en", engine="chromium", connected=True, reader_source=None, media_source=None):
+def browser(tmp_path, locale="en", engine="chromium", connected=True, reader_source=None, media_source=None, workers=False, configure_service=None):
     service = Service(Settings(state_dir=tmp_path / "state"), SourceFixture())
     if media_source is not None:
         service.media.client = media_source
@@ -52,6 +52,10 @@ def browser(tmp_path, locale="en", engine="chromium", connected=True, reader_sou
         service.reader.client = reader_source
     principal = Principal("synthetic@example.invalid", "A" * 40, 20, True, True)
     service.register_instance(principal, 42)
+
+    if configure_service is not None:
+        configure_service(service, principal)
+    pool = service.start_workers(threading.Event()) if workers else None
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         def log_message(self, *_args):
@@ -93,9 +97,13 @@ def browser(tmp_path, locale="en", engine="chromium", connected=True, reader_sou
             finally:
                 instance.close()
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        try:
+            if pool is not None:
+                pool.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
 
 @pytest.mark.parametrize("engine", ["chromium", "webkit"])
@@ -353,17 +361,17 @@ def test_compact_catalogue_filters_search_and_keeps_tools_accessible(tmp_path, e
             page.set_viewport_size({"width": width, "height": 844})
             page.evaluate("location.hash='utilities'")
             page.locator(".utility-toolbar").wait_for()
-            assert page.locator(".tool-card").count() == 19
+            assert page.locator(".tool-card").count() == 20
             assert page.locator(".tool-card p").count() == 0
             assert page.locator(".tool-card").first.bounding_box()["height"] <= 105
             page.locator('[data-group="files"]').click()
-            assert page.locator(".tool-card").count() == 6
+            assert page.locator(".tool-card").count() == 7
             assert page.locator('[data-group="files"]').get_attribute("aria-pressed") == "true"
             page.locator('.utility-search input').fill("CSV")
             assert page.locator(".tool-card").count() == 1
             page.locator('.utility-search input').fill("")
             page.locator('[data-group="all"]').click()
-            assert page.locator(".tool-card").count() == 19
+            assert page.locator(".tool-card").count() == 20
             assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1")
             page.evaluate("location.hash='home'")
             page.locator(".feature-hero").wait_for()

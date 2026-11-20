@@ -109,3 +109,59 @@ def test_startup_signal_prevents_mail_io_and_core_inherits_supervisor_process_gr
     assert factory.call_args.kwargs["process_group"] is None
     rpc.start_io.assert_not_called()
     closer.assert_called_once_with(factory.return_value, 1)
+
+
+def test_runtime_starts_workers_after_recovery_and_joins_before_unlock_and_native_close(tmp_path, monkeypatch):
+    (tmp_path / 'accounts').mkdir()
+    (tmp_path / 'accounts' / 'accounts.toml').write_text('synthetic')
+    state = tmp_path / 'state'
+    stop, order = threading.Event(), []
+    rpc = Mock()
+    rpc.get_all_account_ids.return_value = [1]
+    rpc.is_configured.return_value = True
+    rpc.start_io.side_effect = lambda *_: stop.set()
+    service, workers = Mock(), Mock()
+
+    def locked(label):
+        with (state / 'runtime.lock').open('a') as lock, pytest.raises(BlockingIOError):
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        order.append(label)
+
+    service.ledger.recover_interrupted.side_effect = lambda: locked('recover')
+    service.start_workers.side_effect = lambda _stop: locked('start') or workers
+    workers.close.side_effect = lambda: locked('join')
+    monkeypatch.setattr(core, 'IOTransport', Mock())
+    monkeypatch.setattr(core, 'Rpc', lambda _: rpc)
+    monkeypatch.setattr(runtime, 'Service', lambda _: service)
+    monkeypatch.setattr(runtime, 'DeltaAdapter', Mock())
+    monkeypatch.setattr(runtime, 'build', lambda *_: tmp_path / 'synthetic.xdc')
+    monkeypatch.setattr(runtime, 'close_transport', lambda *_: locked('native-close'))
+    runtime.serve(tmp_path, tmp_path, stop, Settings(state_dir=state))
+    assert order == ['recover', 'start', 'join', 'native-close']
+    with (state / 'runtime.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def test_runtime_worker_failure_still_closes_native_transport_before_unlock(tmp_path, monkeypatch):
+    from michiflin.errors import AppError
+
+    (tmp_path / 'accounts').mkdir()
+    (tmp_path / 'accounts' / 'accounts.toml').write_text('synthetic')
+    rpc, service, workers = Mock(), Mock(), Mock()
+    rpc.get_all_account_ids.return_value = [1]
+    rpc.is_configured.return_value = True
+    workers.check.side_effect = AppError('job_workers_failed')
+    workers.close.side_effect = AppError('job_workers_failed')
+    service.start_workers.return_value = workers
+    monkeypatch.setattr(core, 'IOTransport', Mock())
+    monkeypatch.setattr(core, 'Rpc', lambda _: rpc)
+    monkeypatch.setattr(runtime, 'Service', lambda _: service)
+    monkeypatch.setattr(runtime, 'DeltaAdapter', Mock())
+    monkeypatch.setattr(runtime, 'build', lambda *_: tmp_path / 'synthetic.xdc')
+    closer = Mock()
+    monkeypatch.setattr(runtime, 'close_transport', closer)
+    with pytest.raises(AppError, match='job_workers_failed'):
+        runtime.serve(tmp_path, tmp_path, threading.Event(), Settings(state_dir=tmp_path / 'state'))
+    rpc.start_io.assert_not_called()
+    workers.close.assert_called_once()
+    closer.assert_called_once()

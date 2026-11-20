@@ -372,3 +372,18 @@ def test_revocation_blocks_new_worker_input_binding(queue):
     queue.ledger.revoke(1)
     with pytest.raises(AppError, match='instance_not_authorized'):
         queue.artifact_input(claim, 'text')
+
+
+@pytest.mark.parametrize('state', ['paused', 'uncertain', 'running'])
+def test_pending_work_cannot_be_hidden_by_newer_terminal_history(queue, state):
+    job = enqueue(queue)
+    with queue.ledger.transaction() as db:
+        db.execute('UPDATE jobs SET state=? WHERE id=?', (state, job['id']))
+        source = dict(db.execute('SELECT * FROM jobs WHERE id=?', (job['id'],)).fetchone())
+        for number in range(55):
+            row = dict(source, id=f'{number + 100:032x}', request_id=f'synthetic-finished-{number:04d}',
+                       state='completed', result='{}', created=source['created'] + number + 1)
+            db.execute('INSERT INTO jobs (' + ','.join(row) + ') VALUES (' + ','.join('?' for _ in row) + ')', tuple(row.values()))
+    listing = queue.list('owner-a', 10, 1)['jobs']
+    assert len(listing) == 50
+    assert listing[0]['id'] == job['id']

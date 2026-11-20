@@ -64,7 +64,10 @@
         const actions=el("div",{class:"server-file-actions"});
         if(row.state==="ready"){
           if(row.bytes<=limit)actions.append(remote("server_file_fetch",()=>read(row),"files.read"));
-          actions.append(remote("delete",()=>confirmDelete(row),"files.delete","text"));
+          actions.append(remote("server_file_verify",()=>request("files.checksum",{id:row.id},data=>{
+            if(!/^[a-f0-9]{32}$/.test(data?.id))throw new Error("result_invalid");
+            fill(output,el("p",{class:"caption",role:"status"},tr("server_file_verify_queued")),el("code",{},data.id),button("server_jobs",()=>{location.hash="server_jobs";},"secondary"));
+          }),"files.checksum"),remote("delete",()=>confirmDelete(row),"files.delete","text"));
         }
         list.append(el("article",{class:"paper-panel server-file-row","data-file-id":row.id},el("h3",{},row.name),el("p",{class:"caption"},row.bytes+" B · "+tr("artifact_state_"+row.state)),row.error?el("p",{class:"caption"},tr(row.error)):null,el("details",{},el("summary",{},"SHA-256"),el("code",{},row.sha256)),actions));
       }

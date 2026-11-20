@@ -322,3 +322,29 @@ def test_image_export_uses_native_draft_api_instead_of_a_download_link(tmp_path)
         assert page.evaluate("window.__drafts[0].name") == "michiflin-image.jpg"
         assert page.evaluate("window.__drafts[0].type") == "image/jpeg"
         assert errors == []
+
+
+@pytest.mark.parametrize('engine', ['chromium', 'webkit'])
+def test_archive_action_waits_for_selection_event_and_clears_when_selection_is_removed(tmp_path, engine):
+    zipped = tmp_path / 'synthetic.zip'
+    zipped.write_bytes(archive([('file.txt', b'synthetic')]))
+    with browser(tmp_path, connected=False, engine=engine) as (page, errors):
+        page.evaluate("location.hash='zip_inspector'")
+        control = page.get_by_role('button', name='Inspect archive', exact=True)
+        assert control.is_disabled()
+        page.locator('input[type=file]').evaluate('''file=>{
+          const changed=file.onchange;
+          file.onchange=event=>{window.__finishSelection=()=>changed(event);};
+        }''')
+        page.locator('input[type=file]').set_input_files(zipped)
+        assert control.is_disabled()
+        assert page.locator('.tool-output pre').count() == 0
+        page.evaluate('window.__finishSelection()')
+        control.click()
+        page.locator('.tool-output pre').wait_for()
+        page.locator('input[type=file]').set_input_files([])
+        page.evaluate('window.__finishSelection()')
+        assert control.is_disabled()
+        assert page.locator('.tool-output pre').count() == 0
+        assert page.evaluate('Michiflin.transport.tasks.length') == 0
+        assert errors == []
