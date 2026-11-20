@@ -283,5 +283,7 @@ window.MichiflinLocales.en = {
   "base64_decode": "Base64 → Text",
   "url_encode": "Text → URL encoding",
   "url_decode": "URL encoding → Text",
-  "operation": "Operation"
+  "operation": "Operation",
+  "try_catalogue": "Search the Open Library catalogue instead",
+  "service_daily_limit": "The service-wide daily safety budget is exhausted. Try again after the next UTC day begins."
 };

@@ -151,3 +151,17 @@ class DeltaAdapter:
             return
         self.service.ledger.finish_delivery(receipt, message_id)
         file.unlink(missing_ok=True)
+
+    def resume_deliveries(self) -> None:
+        for row in self.service.ledger.queued_deliveries():
+            try:
+                message = self.rpc.get_message(self.account, row["instance"])
+                if message.from_id != 1 or message.is_forwarded:
+                    raise AppError("identity_unavailable")
+                principal = self.principal(message.chat_id, encrypted=message.show_padlock)
+                self.service.ledger.authorize(row["instance"], principal.storage_key, principal.chat_id)
+                if principal.storage_key != row["owner"] or principal.chat_id != row["chat"]:
+                    raise AppError("identity_unavailable")
+                self.deliver(row["receipt"], principal, row["instance"])
+            except Exception:
+                self.service.ledger.abandon_delivery(row["receipt"])

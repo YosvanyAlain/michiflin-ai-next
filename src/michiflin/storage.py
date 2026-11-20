@@ -29,6 +29,7 @@ class Ledger:
                     PRIMARY KEY (instance,id)
                 );
                 CREATE INDEX IF NOT EXISTS requests_owner_time ON requests(owner,created);
+                CREATE INDEX IF NOT EXISTS requests_created ON requests(created);
                 CREATE TABLE IF NOT EXISTS notes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL,
                     text TEXT NOT NULL, created REAL NOT NULL
@@ -85,7 +86,7 @@ class Ledger:
             raise AppError("instance_not_authorized")
 
     def reserve(self, instance: int, identifier: str, owner: str, operation: str,
-                args: dict, daily_limit: int, pending_limit: int) -> dict | None:
+                args: dict, daily_limit: int, pending_limit: int, global_limit: int = 1000) -> dict | None:
         digest = hashlib.sha256(json.dumps([operation, args], sort_keys=True, ensure_ascii=True,
                                            separators=(",", ":"), allow_nan=False).encode()).hexdigest()
         now = time.time()
@@ -106,6 +107,9 @@ class Ledger:
             count = db.execute("SELECT COUNT(*) FROM requests WHERE owner=? AND created>=?", (owner, midnight)).fetchone()[0]
             if daily_limit and count >= daily_limit:
                 raise AppError("daily_limit")
+            global_count = db.execute("SELECT COUNT(*) FROM requests WHERE created>=?", (midnight,)).fetchone()[0]
+            if global_count >= global_limit:
+                raise AppError("service_daily_limit")
             db.execute("INSERT INTO requests VALUES(?,?,?,?,?,'running',?,?,NULL)",
                        (instance, identifier, owner, digest, operation, now, now))
         return None
@@ -218,3 +222,11 @@ class Ledger:
         with self.transaction() as db:
             db.execute("UPDATE outbox SET state=?,message_id=? WHERE receipt=? AND state='sending'",
                        ("sent" if message_id else "uncertain", message_id, receipt))
+
+    def queued_deliveries(self) -> list[dict]:
+        with self.connection() as db:
+            return [dict(row) for row in db.execute("SELECT * FROM outbox WHERE state='queued' ORDER BY created LIMIT 20")]
+
+    def abandon_delivery(self, receipt: str) -> None:
+        with self.transaction() as db:
+            db.execute("UPDATE outbox SET state='uncertain' WHERE receipt=? AND state='queued'", (receipt,))

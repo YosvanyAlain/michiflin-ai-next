@@ -3,6 +3,7 @@ from __future__ import annotations
 import atexit
 import fcntl
 import logging
+import os
 from pathlib import Path
 
 from .adapter import DeltaAdapter
@@ -12,6 +13,7 @@ from .service import Service
 
 
 def main() -> None:
+    os.umask(0o077)
     from deltabot_cli import BotCli
     from deltachat2 import events
     from deltachat2.types import EventTypeWebxdcStatusUpdate
@@ -40,6 +42,7 @@ def main() -> None:
         active["adapter"] = DeltaAdapter(bot.rpc, accounts[0], service, package)
         active["account"] = accounts[0]
         active["lock"] = lock
+        active["adapter"].resume_deliveries()
 
     @cli.on(events.NewMessage(is_info=False))
     def message(_bot, account, event):

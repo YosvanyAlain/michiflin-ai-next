@@ -160,3 +160,12 @@ def test_unserializable_or_large_result_is_settled_not_left_running(service, mem
     first = service.handle(member, 42, value)
     assert first["error"] in {"result_too_large", "result_invalid"}
     assert service.handle(member, 42, value) == first
+
+
+def test_service_wide_budget_cannot_be_bypassed_by_rotating_sender_keys(service, member):
+    limited = Service(replace(service.settings, global_daily_requests=1))
+    assert limited.handle(member, 42, request(limited))["ok"]
+    another = replace(member, address="another@example.invalid", fingerprint="B" * 40)
+    limited.register_instance(another, 43)
+    result = limited.handle(another, 43, request(limited, identifier="synthetic-other-1234"))
+    assert result["error"] == "service_daily_limit"

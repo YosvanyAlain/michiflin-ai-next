@@ -13,6 +13,7 @@ class Settings:
     public_access: bool = True
     daily_requests: int = 40
     max_pending: int = 3
+    global_daily_requests: int = 1000
     admin_keys: dict[str, str] = field(default_factory=dict, repr=False)
     online_providers: tuple[dict, ...] = field(default=(), repr=False)
     local_model_url: str = ""
@@ -37,13 +38,15 @@ class Settings:
             raise ValueError("MICHIFLIN_PROVIDERS must be a provider list")
         daily = int(os.getenv("MICHIFLIN_DAILY_REQUESTS", "40"))
         pending = int(os.getenv("MICHIFLIN_MAX_PENDING", "3"))
-        if not 1 <= daily <= 10000 or not 1 <= pending <= 20:
+        global_daily = int(os.getenv("MICHIFLIN_GLOBAL_DAILY_REQUESTS", "1000"))
+        if not 1 <= daily <= 10000 or not 1 <= pending <= 20 or not 1 <= global_daily <= 100000:
             raise ValueError("Invalid resource limits")
         return cls(
             state_dir=Path(os.getenv("MICHIFLIN_STATE_DIR", "state")),
             public_access=os.getenv("MICHIFLIN_PUBLIC_ACCESS", "1") == "1",
             daily_requests=daily,
             max_pending=pending,
+            global_daily_requests=global_daily,
             admin_keys=admins,
             online_providers=tuple(providers),
             local_model_url=os.getenv("MICHIFLIN_LOCAL_MODEL_URL", ""),

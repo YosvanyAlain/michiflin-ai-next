@@ -283,5 +283,7 @@ window.MichiflinLocales.es = {
   "base64_decode": "Base64 → Texto",
   "url_encode": "Texto → Codificación URL",
   "url_decode": "Codificación URL → Texto",
-  "operation": "Operación"
+  "operation": "Operación",
+  "try_catalogue": "Buscar en el catálogo de Open Library",
+  "service_daily_limit": "Se agotó el presupuesto diario de seguridad del servicio. Inténtalo cuando comience el siguiente día UTC."
 };

@@ -91,7 +91,7 @@ class Service:
                 raise AppError("session_changed")
             cached = self.ledger.reserve(instance, identifier, principal.storage_key, op, args,
                                          0 if principal.is_admin(self.settings) else self.settings.daily_requests,
-                                         self.settings.max_pending)
+                                         self.settings.max_pending, self.settings.global_daily_requests)
             if cached:
                 return cached
             try:

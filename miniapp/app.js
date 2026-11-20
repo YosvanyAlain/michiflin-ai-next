@@ -85,7 +85,7 @@
       const args={title:title.value.trim(),author:author.value.trim(),category:category.value,source:source.value,format:format.value,language:language.value,page};
       for(const key of ["title","author","category","source","format","language"])storage.write("book."+key,args[key]);
       lastBookQuery=args;
-      const call=M.transport.call("library.search",args,{label:"library"});
+      const call=M.transport.call("library.search",args,{label:"library",context:{query:args}});
       if(call)showPending(document.querySelector("#library-results"));
     };
     filters.onsubmit=event=>{event.preventDefault();search(1);};
@@ -112,7 +112,7 @@
     if(data.has_more)node.append(remoteButton("next_page",()=>{
       const args=lastBookQuery||{title:storage.read("book.title",""),author:storage.read("book.author",""),category:storage.read("book.category",""),source:storage.read("book.source","gutenberg"),format:storage.read("book.format",""),language:storage.read("book.language","")};
       bookPage=Number(data.page||1)+1;lastBookQuery={...args,page:bookPage};
-      if(M.transport.call("library.search",lastBookQuery,{label:"library"}))showPending(node);
+      if(M.transport.call("library.search",lastBookQuery,{label:"library",context:{query:lastBookQuery}}))showPending(node);
     },"secondary","arrow"));
     status();
   };
@@ -225,7 +225,14 @@
     const task=event.detail;
     if(task.op==="library.search"){
       const node=document.querySelector("#library-results");
-      if(task.status==="done"){latestBooks=task.data;storage.write("books",task.data);renderBooks(node,task.data);}else if(node)fill(node,el("p",{class:"library-notice"},tr(task.error)));
+      if(task.status==="done"){latestBooks=task.data;storage.write("books",task.data);renderBooks(node,task.data);}else if(node){
+        fill(node,el("p",{class:"library-notice"},tr(task.error)));
+        if(task.context?.query?.source!=="openlibrary")node.append(button("try_catalogue",()=>{
+          const query={...(task.context?.query||{}),source:"openlibrary",format:"",page:1};
+          Object.entries(query).forEach(([key,value])=>storage.write("book."+key,value));lastBookQuery=query;navigate("library");
+          if(M.transport.call("library.search",query,{label:"library",context:{query}}))showPending(document.querySelector("#library-results"));
+        },"secondary","library"),el("p",{class:"caption"},tr("catalogue_not_download")));
+      }
     }
     if(task.op==="weather.locations"){
       const node=document.querySelector("#weather-places");

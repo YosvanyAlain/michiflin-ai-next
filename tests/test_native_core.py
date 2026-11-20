@@ -61,7 +61,7 @@ def test_native_core_identity_package_status_and_encrypted_restore(tmp_path):
         book.write_text("Synthetic public-domain text for native delivery testing.")
         receipt = "d" * 32
         service.ledger.queue_delivery(receipt, principal.storage_key, chat, instance, book.name, "Synthetic book", book.stat().st_size)
-        adapter.deliver(receipt, principal, instance)
+        adapter.resume_deliveries()
         status = service.ledger.delivery_status(receipt, principal.storage_key)
         assert status["status"] == "sent" and status["message_id"]
         delivered = rpc.get_message(bot, status["message_id"])
