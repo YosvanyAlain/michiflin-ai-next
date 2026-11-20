@@ -126,7 +126,7 @@
   };
   const view=id=>{
     const scope=M.files.scope(),panel=el("section",{class:"tool-workbench"}),output=el("div",{class:"tool-output",role:"status",hidden:true});let busy=false;
-    panel.append(el("p",{class:"privacy-note"},tr("local_file_privacy")),el("p",{class:"caption"},tr("file_export_notice")));
+    panel.append(el("p",{class:"privacy-note"},tr("local_file_privacy")),el("details",{class:"usage-details"},el("summary",{},tr("privacy_and_limits")),el("p",{class:"caption"},tr("file_export_notice"))));
     const reset=()=>{
       scope.cancel();for(const audio of output.querySelectorAll("audio")){audio.pause();audio.removeAttribute("src");audio.load();}
       fill(output);output.hidden=true;

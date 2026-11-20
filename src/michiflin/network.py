@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 
 import requests
 
+from .egress import configure_source_session
 from .errors import AppError
 
 SERVICE_HOSTS = frozenset({
@@ -38,7 +39,7 @@ class JsonClient:
             self._last[parsed.hostname] = time.monotonic()
         try:
             with requests.Session() as session:
-                session.trust_env = False
+                configure_source_session(session)
                 session.headers["User-Agent"] = "Michiflin/0.1" + (f" ({self.contact})" if self.contact else "")
                 with session.get(url, params=params, timeout=(5, 18), stream=True, allow_redirects=False) as response:
                     if response.status_code == 429:

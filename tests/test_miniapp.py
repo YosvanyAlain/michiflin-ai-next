@@ -339,3 +339,32 @@ def test_upstream_book_failure_offers_an_explicit_catalogue_not_fake_downloads(t
         assert page.locator(".book-links a").count() == 0
         assert page.get_by_role("button", name="Receive in chat").count() == 0
         assert errors == []
+
+
+@pytest.mark.parametrize("engine", ["chromium", "webkit"])
+@pytest.mark.parametrize("locale", ["en", "es"])
+def test_compact_catalogue_filters_search_and_keeps_tools_accessible(tmp_path, engine, locale):
+    with browser(tmp_path, locale, engine, connected=False) as (page, errors):
+        for width in [320, 390, 768, 1440]:
+            page.set_viewport_size({"width": width, "height": 844})
+            page.evaluate("location.hash='utilities'")
+            page.locator(".utility-toolbar").wait_for()
+            assert page.locator(".tool-card").count() == 16
+            assert page.locator(".tool-card p").count() == 0
+            assert page.locator(".tool-card").first.bounding_box()["height"] <= 105
+            page.locator('[data-group="files"]').click()
+            assert page.locator(".tool-card").count() == 5
+            assert page.locator('[data-group="files"]').get_attribute("aria-pressed") == "true"
+            page.locator('.utility-search input').fill("CSV")
+            assert page.locator(".tool-card").count() == 1
+            page.locator('.utility-search input').fill("")
+            page.locator('[data-group="all"]').click()
+            assert page.locator(".tool-card").count() == 16
+            assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1")
+            page.evaluate("location.hash='home'")
+            page.locator(".feature-hero").wait_for()
+            assert page.locator(".feature-hero").bounding_box()["height"] <= 260
+        page.evaluate("location.hash='assistant'")
+        page.locator(".usage-details summary").click()
+        assert page.locator(".usage-details .caption").first.is_visible()
+        assert errors == []

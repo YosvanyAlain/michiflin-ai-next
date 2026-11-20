@@ -10,6 +10,7 @@ from urllib.parse import urljoin, urlsplit
 
 import requests
 
+from .egress import configure_source_session
 from .errors import AppError
 from .library import FORMATS, _allowed_download
 
@@ -46,7 +47,7 @@ def fetch_bytes(url: str) -> bytes:
     deadline = time.monotonic() + 50
     try:
         with requests.Session() as session:
-            session.trust_env = False
+            configure_source_session(session)
             session.headers["User-Agent"] = "Michiflin/0.1 (ebook delivery)"
             for _ in range(4):
                 if not _allowed_download(url) or urlsplit(url).scheme != "https":
