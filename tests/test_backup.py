@@ -8,6 +8,7 @@ import pytest
 
 pytest.importorskip("cryptography")
 from michiflin.backup import create, restore, seal, unseal
+from michiflin.errors import AppError
 from michiflin.storage import Ledger
 
 PASSPHRASE = "synthetic-snapshot-passphrase-not-production"
@@ -49,6 +50,17 @@ def test_native_snapshot_restores_account_ledger_and_pending_delivery_without_io
     ledger = Ledger(tmp_path / "state")
     ledger.bind(42, "synthetic-owner", 20)
     ledger.add_note("synthetic-owner", "Preserve this note")
+    from michiflin.jobs import JobQueue, Kind
+
+    jobs = JobQueue(ledger, kinds={"synthetic.v1": Kind(lambda _payload: None)})
+    completed = jobs.enqueue("synthetic-owner", 20, 42, "synthetic-job-completed", "synthetic.v1", {})
+    done_claim = jobs.claim()
+    jobs.finish(done_claim, result={"receipt": "confirmed-synthetic-result"})
+    jobs.worker_stopped(done_claim)
+    interrupted = jobs.enqueue("synthetic-owner", 20, 42, "synthetic-job-interrupted", "synthetic.v1", {})
+    interrupted_claim = jobs.claim()
+    jobs.heartbeat(interrupted_claim, current=1, total=2, checkpoint={"part": 1})
+    queued = jobs.enqueue("synthetic-owner", 20, 42, "synthetic-job-queued", "synthetic.v1", {})
     deliveries = ledger.path.parent / "deliveries"
     deliveries.mkdir()
     receipt = "c" * 32
@@ -82,6 +94,18 @@ def test_native_snapshot_restores_account_ledger_and_pending_delivery_without_io
         assert db.execute("SELECT text FROM notes").fetchone()[0] == "Preserve this note"
         assert db.execute("SELECT state FROM outbox").fetchone()[0] == "queued"
     assert (destination / "state" / "deliveries" / payload.name).read_bytes() == payload.read_bytes()
+    restored_ledger = Ledger(destination / "state")
+    restored_jobs = JobQueue(restored_ledger, kinds=jobs.kinds)
+    restored_ledger.recover_interrupted()
+    assert restored_jobs.get("synthetic-owner", 20, 42, completed["id"])["result"] == {"receipt": "confirmed-synthetic-result"}
+    assert restored_jobs.get("synthetic-owner", 20, 42, interrupted["id"])["state"] == "uncertain"
+    assert not restored_jobs.get("synthetic-owner", 20, 42, interrupted["id"])["worker_stopped"]
+    assert restored_jobs.get("synthetic-owner", 20, 42, queued["id"])["state"] == "queued"
+    assert restored_jobs.claim() is None  # A restored lease never proves the old worker has stopped.
+    with pytest.raises(AppError, match="job_lease_expired"):
+        restored_jobs.finish(interrupted_claim, result={"late": True})
+    with restored_ledger.connection() as db:
+        assert db.execute("SELECT checkpoint FROM jobs WHERE id=?", (interrupted["id"],)).fetchone()[0] == '{"part":1}'
     if include_catalog:
         from michiflin import gutenberg
 

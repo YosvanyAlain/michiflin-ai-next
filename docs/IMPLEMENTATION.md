@@ -29,7 +29,7 @@ Status vocabulary: **pending**, **developing**, **implemented** (code exists), *
 | Existing native identity and encrypted checkpoints | Private authenticated deployment/backup path | Preserve original; verify before native import; do not publish identifiers |
 | Existing online-provider configuration | Private runtime configuration | Inventory provider compatibility without printing keys; bind to current authorization |
 | Optional Gutenberg catalogue | Bounded authenticated snapshot/bootstrap already implemented | Retain original fetched age and hash; fresh rights metadata remains required |
-| Existing notes, request/outbox Ledger and new jobs | Private runtime SQLite, deliberately not included in current backup allowlist | Design versioned consistent export, identity binding, uncertainty semantics and restore tests before claiming durable backup recovery |
+| Existing notes, request/outbox Ledger and new job rows | Private runtime SQLite included through the existing consistent SQLite backup and authenticated manifest | Native offline snapshot tests preserve completed results, queued work and checkpoints; interrupted jobs become uncertain and retain slots after startup recovery. Arbitrary future job artifacts are not included yet. |
 | Legacy per-module workspaces, browser state, images and memories | Availability not established by this increment | Inspect metadata privately, dry-run per module and keep originals; never import permissions |
 | Phone-only/local miniapp state and temporary files | Not assumed available on server | Explicit user-controlled export/import; report unavailable data honestly |
 

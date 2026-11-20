@@ -35,7 +35,11 @@ A libseccomp filter rejects sockets, process/thread creation, namespace changes,
 
 `OfflineRunner` connects queue claims to reviewed scripts, periodically renews leases, observes controls, and publishes only bounded JSON results. There are no external side effects or delivery actions in these handlers. Pause kills this isolated attempt and discards its temporary files; resume recomputes within the remaining cumulative budget, not from a fictional suspended process. Hosting shutdown leaves the affected job uncertain, not implicitly user-cancelled. The supervisor must own runner threads and the runtime lock until shutdown. Neither `Service` initialization nor opening a screen starts the runner.
 
-Network-enabled downloads/media, external cancellation, disk-backed artifacts, fair bandwidth/CPU shares, resumable provider checkpoints, transfer retention, durable encrypted backup inclusion, a queue UI and native-client execution remain separate gates. Do not reuse this offline-only sandbox as an extractor proxy or expose arbitrary handler/script selection through job arguments.
+The existing authenticated backup already includes a consistent SQLite copy, so job rows, results and checkpoints travel with it. Native offline snapshot tests verify restored completed/queued/interrupted jobs and conservative startup recovery. This does not include arbitrary future job files: those need an explicit bounded artifact inventory and restore policy.
+
+Network-enabled downloads/media, external cancellation, disk-backed artifacts and their encrypted backup inclusion, fair bandwidth/CPU shares, resumable provider checkpoints, transfer retention, a queue UI and native-client execution remain separate gates. Do not reuse this offline-only sandbox as an extractor proxy or expose arbitrary handler/script selection through job arguments.
+
+On Ubuntu with restricted unprivileged user namespaces, installing Bubblewrap alone may not grant namespace creation. After installing distribution `bubblewrap` and `libseccomp2`, the explicit root-only `tools/setup_sandbox.sh` can install a narrowly attached AppArmor profile for the root-owned `/usr/bin/bwrap`. It never disables the global restriction and refuses to overwrite an existing profile. This is an operator/CI host setup action, never something the service runs. Run `python tools/check_sandbox.py` afterward; a successful package installation or namespace-only probe is not a complete sandbox check.
 
 ## Evidence
 
