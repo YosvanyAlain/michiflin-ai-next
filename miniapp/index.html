@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en" data-theme="system">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Michiflin AI</title>
+<link rel="stylesheet" href="styles/workspace.css">
+<script src="webxdc.js"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<div class="app-shell">
+  <aside class="navigation-panel">
+    <a class="brand" href="#home" aria-label="Michiflin AI"><img src="assets/mark.svg" width="35" height="35" alt=""><span>Michiflin<span class="brand-ai">AI</span></span></a>
+    <p class="navigation-caption" data-i18n="workspace"></p>
+    <nav id="desktop-navigation" aria-label="Main navigation"></nav>
+    <div class="navigation-foot"><button id="connection-status" class="connection-status" type="button"></button><p data-i18n="privacy"></p></div>
+  </aside>
+  <section class="workspace-panel">
+    <header class="workspace-header"><div class="header-path"><span>Michiflin AI</span><i>/</i><strong id="page-title"></strong></div><div class="header-actions"><button id="preferences-button" class="round-button" type="button" aria-label="Settings"></button><span class="profile-badge" aria-hidden="true">M</span></div></header>
+    <main id="content" tabindex="-1"></main>
+    <footer class="workspace-footer"><span>MICHIFLIN AI <i>✦</i></span><span data-i18n="privacy"></span></footer>
+  </section>
+</div>
+<nav id="mobile-navigation" class="mobile-navigation" aria-label="Mobile navigation"></nav>
+<dialog id="preferences-dialog" class="preferences-dialog"><header><h2 data-i18n="settings"></h2><button id="preferences-close" class="round-button" type="button" aria-label="Close">×</button></header><div id="preferences-content"></div></dialog>
+<div id="notifications" class="notifications" role="status" aria-live="polite"></div>
+<script src="locales/en.js"></script>
+<script src="locales/es.js"></script>
+<script src="ui.js"></script>
+<script src="transport.js"></script>
+<script src="offline.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
