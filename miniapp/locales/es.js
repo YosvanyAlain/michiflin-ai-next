@@ -411,5 +411,17 @@ window.MichiflinLocales.es = {
   "sandbox_output_limit": "El proceso aislado superó su límite de salida.",
   "sandbox_result_invalid": "El proceso aislado devolvió un resultado no válido.",
   "sandbox_unavailable": "El aislamiento seguro no está disponible. No se ejecutó nada sin él.",
-  "sandbox_timeout": "El proceso aislado alcanzó su límite de tiempo."
+  "sandbox_timeout": "El proceso aislado alcanzó su límite de tiempo.",
+  "invalid_part_budget": "El tamaño de parte o el presupuesto de correo no es válido.",
+  "invalid_parts_manifest": "El manifiesto de partes no es válido o no está admitido.",
+  "unsafe_parts_path": "Esta ruta no se puede usar de forma segura para las partes.",
+  "unsafe_parts_file": "Una parte supera el límite o no es un archivo normal seguro.",
+  "parts_source_changed": "El original cambió durante la copia. No se publicó ningún archivo incompleto.",
+  "atomic_publish_unavailable": "Este sistema de archivos no puede publicar el resultado de forma segura.",
+  "parts_destination_exists": "El destino ya existe. No se sobrescribió.",
+  "parts_count_limit": "Hay demasiadas partes. Elige un tamaño permitido mayor.",
+  "parts_publication_uncertain": "El resultado completo existe, pero su persistencia en disco no está confirmada. Verifícalo antes de repetir.",
+  "parts_unexpected_files": "La carpeta contiene archivos que no figuran en el manifiesto.",
+  "parts_missing": "Faltan partes. No se publicó ningún archivo unido.",
+  "parts_hash_mismatch": "Una parte o el archivo completo no coincide con su suma de comprobación. No se publicó el resultado."
 };

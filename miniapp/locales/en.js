@@ -411,5 +411,17 @@ window.MichiflinLocales.en = {
   "sandbox_output_limit": "The isolated process exceeded its output limit.",
   "sandbox_result_invalid": "The isolated process returned an invalid result.",
   "sandbox_unavailable": "Secure process isolation is unavailable. Nothing ran without it.",
-  "sandbox_timeout": "The isolated process reached its time limit."
+  "sandbox_timeout": "The isolated process reached its time limit.",
+  "invalid_part_budget": "The part size or mail budget is invalid.",
+  "invalid_parts_manifest": "The part manifest is invalid or unsupported.",
+  "unsafe_parts_path": "This path cannot be used safely for split files.",
+  "unsafe_parts_file": "A part is oversized or is not a safe regular file.",
+  "parts_source_changed": "The source changed while it was being copied. Nothing incomplete was published.",
+  "atomic_publish_unavailable": "This filesystem cannot publish the result safely.",
+  "parts_destination_exists": "The destination already exists. It was not overwritten.",
+  "parts_count_limit": "Too many parts. Choose a larger permitted part size.",
+  "parts_publication_uncertain": "The complete result exists, but disk persistence is unconfirmed. Verify it before retrying.",
+  "parts_unexpected_files": "The bundle contains files not listed in its manifest.",
+  "parts_missing": "Some parts are missing. No joined file was published.",
+  "parts_hash_mismatch": "A part or the complete file failed its checksum. No result was published."
 };

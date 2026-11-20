@@ -11,6 +11,7 @@ __pycache__/
 *.log
 *.xdc
 state/
+accounts/
 private/
 artifacts/
 node_modules/
