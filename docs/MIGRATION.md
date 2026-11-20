@@ -21,14 +21,15 @@ The compact interface keeps the new typography, palette, illustration, themes an
 | Local file/image/table/archive/WAV tools | Implemented; not a remote filesystem or universal transcoder | Keep file inputs private and native export user-controlled |
 | WARP egress | Optional, scoped source-client adapter and manual Actions probe implemented | Verify WARP and each destination on the actual hosting runner |
 | YouTube/media inspection and selected download | Not implemented | Isolated extractor, public-address validation, rights/terms policy, format/size/duration limits, bounded retries, cancellation and genuine playable output |
-| Web search and low-bandwidth page reader | Not implemented | Source attribution, safe fetched redirects, DNS rebinding defenses, sanitization, pagination and actual readable output |
+| Low-bandwidth page reader | Implemented with a separate DNS-pinned HTTPS transport, local pagination and explicit text export | Live host-route probes and production lifecycle; no JavaScript rendering or login bypass |
+| Web search | Not implemented | Search-provider attribution, result limits and explicit follow-up through the safe reader |
 | Transcripts, translation and Internet Archive music | Not implemented | Provider/track provenance, licensing, language selection, explicit failure and transfer budgets |
 | PDF/OCR, screenshots and broader conversion | Not implemented | Resource-isolated workers, format validation and actual output tests |
 | Coding workspace and miniapp export | Not implemented | No host shell or secrets, isolated execution, package validation and explicit export |
 | Remote files, selective extraction and rename undo | Not implemented | Identity-bound storage, transactions, traversal/bomb/symlink defenses and restore tests |
 | Split transfer/checksums and fair worker queue | Not implemented as a general transfer service | Mailbox-aware part budgets, safe joining, cancellation and crash/replay tests |
 
-Media and safe web reading are the next connected priorities. They are not replaced by cosmetic cards. No unavailable service is added to the executable catalogue merely to resemble the previous miniapp.
+Media and web search are the next connected priorities. The safe text reader is now a real connected operation, not a placeholder. They are not replaced by cosmetic cards. No unavailable service is added to the executable catalogue merely to resemble the previous miniapp.
 
 ## WARP adaptation
 
@@ -37,12 +38,12 @@ The reference used Cloudflare WARP in local proxy mode and verified an exact `wa
 The new implementation intentionally starts narrower:
 
 1. The manually dispatched source-check workflow optionally installs the official Cloudflare Ubuntu package, uses proxy mode on loopback port 40000 and verifies the tunnel. Failed verification stops the selected WARP probe; it does not silently produce a direct-route result.
-2. Only the existing allowlisted metadata, weather and Gutenberg download clients read `MICHIFLIN_SOURCE_PROXY`. Bot transport, model providers and private backup traffic do not opt in. Ambient proxy variables remain ignored.
+2. Only the existing allowlisted metadata/weather/Gutenberg clients and the separate public-address-pinned text reader read `MICHIFLIN_SOURCE_PROXY`. Bot transport, model providers and private backup traffic do not opt in. Ambient proxy variables remain ignored.
 3. Only the canonical `socks5://127.0.0.1:<unprivileged-port>` form is accepted, without credentials, paths or remote proxy hosts. Local DNS resolution is retained, unlike `socks5h`. Existing HTTPS host restrictions, redirect validation, certificate checks, byte limits and time budgets remain in force.
 4. A configured proxy failure is reported, not silently retried directly. The manual probe can be run separately with and without WARP for an honest comparison.
-5. This is not an arbitrary-URL gateway. Before enabling media or browser workers, implement and test public-address pinning for every request and redirect, including extractor manifests, segments and thumbnails. Never pass a proxy directly to a general extractor and assume that makes it safe.
+5. The text reader validates arbitrary public HTTPS page destinations with a separate pinned-address transport; it is not a general extractor gateway. Before enabling media or browser workers, extend and test equivalent controls for every auxiliary request, including extractor manifests, segments and thumbnails. Never pass a proxy directly to a general extractor and assume that makes it safe.
 
-For source diagnostics, run `python -m michiflin.diagnostics --download`. The EPUB probe checks rights metadata, fetches actual bytes and validates the EPUB archive. Metadata alone is never a successful download. WARP does not bypass authentication, paywalls, DRM or platform terms; only permitted content should be requested.
+For source diagnostics, run `python -m michiflin.diagnostics --download --reader`. The EPUB probe checks rights metadata, fetches actual bytes and validates the EPUB archive. Metadata alone is never a successful download. WARP does not bypass authentication, paywalls, DRM or platform terms; only permitted content should be requested.
 
 ## Release status
 

@@ -8,9 +8,8 @@ import requests
 from .errors import AppError
 
 
-def configure_source_session(session: requests.Session) -> None:
-    """Route only explicitly opted-in, allowlisted source clients through local SOCKS."""
-    session.trust_env = False
+def source_proxy() -> str | None:
+    """Accept only the reviewed, explicitly selected local SOCKS endpoint."""
     value = os.environ.get("MICHIFLIN_SOURCE_PROXY", "")
     if not value:
         return
@@ -32,4 +31,11 @@ def configure_source_session(session: requests.Session) -> None:
         valid = False
     if not valid:
         raise AppError("source_proxy_invalid")
-    session.proxies.update({"https": value})
+    return value
+
+
+def configure_source_session(session: requests.Session) -> None:
+    """Route only explicitly opted-in, allowlisted source clients through local SOCKS."""
+    session.trust_env = False
+    if value := source_proxy():
+        session.proxies.update({"https": value})

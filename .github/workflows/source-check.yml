@@ -6,6 +6,10 @@ on:
         description: Route public source probes through verified local WARP
         type: boolean
         default: false
+      check_reader:
+        description: Fetch and parse a real public web page
+        type: boolean
+        default: true
       check_download:
         description: Fetch and validate an actual public-domain EPUB
         type: boolean
@@ -26,15 +30,15 @@ jobs:
         if: inputs.use_warp
         timeout-minutes: 5
         run: bash tools/setup_warp.sh
-      - name: Probe search, weather and optional ebook delivery
+      - name: Probe public sources, reader and optional ebook delivery
         env:
+          CHECK_READER: ${{ inputs.check_reader }}
           CHECK_DOWNLOAD: ${{ inputs.check_download }}
         run: |
-          if [ "$CHECK_DOWNLOAD" = true ]; then
-            python -m michiflin.diagnostics --download
-          else
-            python -m michiflin.diagnostics
-          fi
+          args=()
+          if [ "$CHECK_DOWNLOAD" = true ]; then args+=(--download); fi
+          if [ "$CHECK_READER" = true ]; then args+=(--reader); fi
+          python -m michiflin.diagnostics "${args[@]}"
       - name: Disconnect WARP
         if: always() && inputs.use_warp
         run: warp-cli --accept-tos disconnect || true

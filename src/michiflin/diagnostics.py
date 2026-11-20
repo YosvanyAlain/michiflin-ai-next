@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from . import downloads, library, weather
 from .errors import AppError
 from .network import JsonClient
+from .reader import Reader
 
 
 def check_sources() -> dict:
@@ -45,13 +46,26 @@ def check_download() -> dict:
         return {"ok": False, "error": error.code}
 
 
+def check_reader() -> dict:
+    try:
+        data = Reader().read({"url": "https://example.com/"})
+        if data["title"] != "Example Domain" or "domain" not in " ".join(data["pages"]).lower():
+            raise AppError("web_content_invalid")
+        return {"ok": True, "characters": data["characters"], "pages": len(data["pages"])}
+    except AppError as error:
+        return {"ok": False, "error": error.code}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Probe actual public sources without private bot state.")
     parser.add_argument("--download", action="store_true", help="Fetch and validate a lawful public-domain EPUB.")
+    parser.add_argument("--reader", action="store_true", help="Fetch and parse an actual public web page.")
     args = parser.parse_args()
     results = check_sources()
     if args.download:
         results["gutenberg_epub"] = check_download()
+    if args.reader:
+        results["web_reader"] = check_reader()
     print(json.dumps(results, indent=2))
     if not all(item["ok"] for item in results.values()):
         raise SystemExit(1)

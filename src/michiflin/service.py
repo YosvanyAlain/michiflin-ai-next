@@ -13,6 +13,7 @@ from .errors import AppError
 from .identity import Principal
 from .models import ModelGateway
 from .network import JsonClient
+from .reader import Reader
 from .storage import Ledger
 
 
@@ -29,6 +30,7 @@ class Service:
         self.ledger = Ledger(settings.state_dir)
         self.client = client or JsonClient(contact=settings.contact)
         self.models = ModelGateway(settings)
+        self.reader = Reader()
         self.session = secrets.token_urlsafe(24)
         self.started = time.monotonic()
         self.operations = {
@@ -36,6 +38,7 @@ class Service:
             "library.deliver": Operation(lambda p, args, _l, instance: downloads.prepare(
                 self.client, self.ledger, settings.state_dir / "deliveries", p, instance, args), instance=True),
             "delivery.status": Operation(lambda p, args, _l: self.ledger.delivery_status(args.get("receipt"), p.storage_key)),
+            "web.read": Operation(lambda _p, args, _l: self.reader.read(args)),
             "weather.locations": Operation(lambda _p, args, locale: weather.locations(self.client, args.get("query", ""), locale)),
             "weather.forecast": Operation(lambda _p, args, _l: weather.forecast(self.client, args.get("latitude"), args.get("longitude"))),
             "utilities.calculate": Operation(lambda _p, args, _l: utilities.calculate(args.get("expression"))),
