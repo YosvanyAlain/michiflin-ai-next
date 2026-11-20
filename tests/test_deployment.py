@@ -158,3 +158,42 @@ def _execute_fixture(tmp_path, monkeypatch, *, validate_only, fail_checkpoint=Fa
         run.assert_not_called()
         assert not list(tmp_path.glob("next-session-*"))
     checkpoint.assert_called_once()
+
+
+def test_real_synthetic_runtime_shutdown_and_restored_restart(tmp_path):
+    import fcntl
+    import shutil
+    from pathlib import Path
+
+    core = pytest.importorskip("deltachat2")
+    if not shutil.which("deltachat-rpc-server"):
+        pytest.skip("Native Delta Chat core is not installed")
+    from michiflin.backup import create, restore
+    from michiflin.storage import Ledger
+
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    with core.IOTransport(accounts_dir=str(runtime / "accounts")) as transport:
+        rpc = core.Rpc(transport)
+        account = rpc.add_account()
+        for key, value in (("addr", "session-test@example.invalid"),
+                           ("configured_addr", "session-test@example.invalid"), ("configured", "1")):
+            rpc.set_config(account, key, value)
+        rpc.get_chat_securejoin_qr_code(account, None)
+    source = Path(__file__).resolve().parents[1] / "miniapp"
+    config = {"admin_keys": {}, "providers": []}
+    assert deployment.run_bounded(runtime, config, 1, source) == 0
+    assert list((runtime / "state" / "packages").glob("*.xdc"))
+    with (runtime / "state" / "runtime.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    encrypted = tmp_path / "synthetic.snapshot"
+    passphrase = "synthetic-private-session-checkpoint-only"
+    with core.IOTransport(accounts_dir=str(runtime / "accounts")) as transport:
+        rpc = core.Rpc(transport)
+        create(rpc, rpc.get_all_account_ids()[0], Ledger(runtime / "state"), encrypted, passphrase)
+    restored = tmp_path / "restored"
+    result = restore(encrypted, restored, passphrase)
+    assert result["identity_verified"] and result["io_started"] is False
+    assert deployment.run_bounded(restored, config, 1, source) == 0
+    with (restored / "state" / "runtime.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
