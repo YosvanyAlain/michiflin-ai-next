@@ -41,7 +41,8 @@ def test_snapshot_failure_never_overwrites_or_deletes_an_existing_file(tmp_path)
     assert existing.read_bytes() == b"preserve this file"
 
 
-def test_native_snapshot_restores_account_ledger_and_pending_delivery_without_io(tmp_path):
+@pytest.mark.parametrize("include_catalog", [False, True])
+def test_native_snapshot_restores_account_ledger_and_pending_delivery_without_io(tmp_path, monkeypatch, include_catalog):
     core = pytest.importorskip("deltachat2")
     if not shutil.which("deltachat-rpc-server"):
         pytest.skip("Native core is not installed")
@@ -54,6 +55,18 @@ def test_native_snapshot_restores_account_ledger_and_pending_delivery_without_io
     payload = deliveries / (receipt + ".txt")
     payload.write_text("Synthetic public-domain ebook")
     ledger.queue_delivery(receipt, "synthetic-owner", 20, 42, payload.name, "Book", payload.stat().st_size)
+    if include_catalog:
+        import gzip
+        import os
+        import time
+
+        from test_gutenberg import CSV
+
+        cached = ledger.path.parent / "catalog" / "catalog.csv.gz"
+        cached.parent.mkdir()
+        cached.write_bytes(gzip.compress(CSV.encode()))
+        fetched_at = int(time.time()) - 3600
+        os.utime(cached, (fetched_at, fetched_at))
     encrypted = tmp_path / "next.snapshot"
     with core.IOTransport(accounts_dir=str(tmp_path / "original-accounts")) as transport:
         rpc = core.Rpc(transport)
@@ -69,6 +82,19 @@ def test_native_snapshot_restores_account_ledger_and_pending_delivery_without_io
         assert db.execute("SELECT text FROM notes").fetchone()[0] == "Preserve this note"
         assert db.execute("SELECT state FROM outbox").fetchone()[0] == "queued"
     assert (destination / "state" / "deliveries" / payload.name).read_bytes() == payload.read_bytes()
+    if include_catalog:
+        from michiflin import gutenberg
+
+        restored_cache = destination / "state" / "catalog" / "catalog.csv.gz"
+        assert restored_cache.read_bytes() == cached.read_bytes()
+        assert int(restored_cache.stat().st_mtime) == fetched_at
+        assert restored_cache.stat().st_mode & 0o777 == 0o600
+        monkeypatch.setattr(gutenberg, "fetch", lambda *_a, **_k: pytest.fail("A restored fresh feed must not be downloaded again"))
+        client = gutenberg.GutenbergClient(restored_cache.parent)
+        client.sync()
+        assert client.database.is_file()
+    else:
+        assert not (destination / "state" / "catalog").exists()
     with pytest.raises(ValueError, match="new, empty"):
         restore(encrypted, destination, PASSPHRASE)
 
@@ -95,3 +121,54 @@ def test_snapshot_cli_refuses_an_active_runtime_lock(tmp_path, monkeypatch, caps
             main()
     assert "Stop the runtime" in capsys.readouterr().err
     assert not (tmp_path / "snapshot").exists()
+
+
+@pytest.mark.parametrize('case', ['missing_payload', 'unlisted_payload', 'wrong_hash', 'negative_time', 'boolean_time', 'oversized', 'symlink'])
+def test_invalid_optional_catalogue_never_reaches_native_identity_import(tmp_path, monkeypatch, case):
+    import io
+    import json
+    import tarfile
+    from unittest.mock import Mock
+
+    import deltachat2
+
+    from michiflin.gutenberg import FEED_LIMIT
+
+    payload = b'synthetic public cache'
+    manifest = {'format': 1, 'deliveries': {},
+                'account_sha256': hashlib.sha256(b'account').hexdigest(),
+                'workspace_sha256': hashlib.sha256(b'workspace').hexdigest(),
+                'catalog': {'sha256': hashlib.sha256(payload).hexdigest(), 'fetched_at': 1}}
+    if case == 'unlisted_payload':
+        manifest.pop('catalog')
+    elif case == 'wrong_hash':
+        manifest['catalog']['sha256'] = '0' * 64
+    elif case == 'negative_time':
+        manifest['catalog']['fetched_at'] = -1
+    elif case == 'boolean_time':
+        manifest['catalog']['fetched_at'] = True
+    elif case == 'oversized':
+        payload = b'x' * (FEED_LIMIT + 1)
+    archive = tmp_path / 'malformed.tar'
+    with tarfile.open(archive, 'w') as bundle:
+        entries = {'account.tar': b'account', 'workspace.sqlite3': b'workspace', 'manifest.json': json.dumps(manifest).encode()}
+        if case != 'missing_payload':
+            entries['catalog.csv.gz'] = payload
+        for name, body in entries.items():
+            item = tarfile.TarInfo(name)
+            item.size = len(body)
+            if name == 'catalog.csv.gz' and case == 'symlink':
+                item.type = tarfile.SYMTYPE
+                item.linkname = '/private/identity'
+                item.size = 0
+                bundle.addfile(item)
+            else:
+                bundle.addfile(item, io.BytesIO(body))
+    encrypted = tmp_path / 'malformed.snapshot'
+    seal(archive, encrypted, PASSPHRASE)
+    native = Mock(side_effect=AssertionError('Invalid cache must fail before importing any native identity'))
+    monkeypatch.setattr(deltachat2, 'IOTransport', native)
+    with pytest.raises(ValueError):
+        restore(encrypted, tmp_path / 'restored', PASSPHRASE)
+    native.assert_not_called()
+    assert not (tmp_path / 'restored').exists()

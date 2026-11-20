@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -17,14 +18,22 @@ from .reader import Reader
 
 def check_sources() -> dict:
     def probe(name, run):
+        started = time.monotonic()
         try:
             with tempfile.TemporaryDirectory(prefix="michiflin-source-") as directory:
                 client = GutenbergClient(Path(directory)) if name == "gutenberg_catalog" else JsonClient()
                 data = run(client)
-            return name, {"ok": True, "items": len(data.get("books", data.get("places", []))),
+                result = {"ok": True, "items": len(data.get("books", data.get("places", []))),
                           "forecast": data.get("data_kind") == "weather_model"}
+                if name == "gutenberg_catalog":
+                    result["compressed_feed_bytes"] = client.feed.stat().st_size
+                    client.database.unlink()
+                    rebuild = time.monotonic()
+                    client.sync()
+                    result["cached_rebuild_seconds"] = round(time.monotonic() - rebuild, 3)
+            return name, {**result, "elapsed_seconds": round(time.monotonic() - started, 3)}
         except AppError as error:
-            return name, {"ok": False, "error": error.code}
+            return name, {"ok": False, "error": error.code, "elapsed_seconds": round(time.monotonic() - started, 3)}
 
     operations = [
         ("gutenberg_catalog", lambda client: library.search(client, library.BookQuery(title="Pride", format="epub"))),

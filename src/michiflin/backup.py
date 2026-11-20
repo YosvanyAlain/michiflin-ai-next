@@ -8,12 +8,14 @@ import shutil
 import sqlite3
 import tarfile
 import tempfile
+import time
 from pathlib import Path
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from .adapter import key_fingerprint
+from .gutenberg import FEED_LIMIT
 
 MAGIC = b"MICHIFLIN-NEXT-SNAPSHOT-1\0"
 LIMIT = 512 * 1024 * 1024
@@ -110,16 +112,23 @@ def create(rpc, account: int, ledger, destination: Path, passphrase: str) -> dic
                 deliveries[filename] = _hash(file)
         manifest = {"format": 1, "deliveries": deliveries, "identity": key_fingerprint(rpc.make_vcard(account, [1])),
                     "account_sha256": _hash(native[0]), "workspace_sha256": _hash(workspace)}
+        catalog = ledger.path.parent / "catalog" / "catalog.csv.gz"
+        if (not catalog.parent.is_symlink() and not catalog.is_symlink() and catalog.is_file()
+                and 0 < catalog.stat().st_size <= FEED_LIMIT):
+            manifest["catalog"] = {"sha256": _hash(catalog), "fetched_at": max(0, int(catalog.stat().st_mtime))}
         info = directory / "manifest.json"
         info.write_text(json.dumps(manifest))
         archive = directory / "bundle.tar"
         with tarfile.open(archive, "w") as bundle:
             for name, path in (("account.tar", native[0]), ("workspace.sqlite3", workspace), ("manifest.json", info)):
                 bundle.add(path, arcname=name, recursive=False)
+            if "catalog" in manifest:
+                bundle.add(catalog, arcname="catalog.csv.gz", recursive=False)
             for filename in deliveries:
                 bundle.add(ledger.path.parent / "deliveries" / filename, arcname="deliveries/" + filename, recursive=False)
         seal(archive, destination, passphrase)
-    return {"bytes": destination.stat().st_size, "sha256": _hash(destination)}
+    return {"bytes": destination.stat().st_size, "sha256": _hash(destination),
+            "catalog_bytes": catalog.stat().st_size if "catalog" in manifest else 0}
 
 
 def restore(source: Path, destination: Path, passphrase: str) -> dict:
@@ -135,13 +144,13 @@ def restore(source: Path, destination: Path, passphrase: str) -> dict:
         with tarfile.open(archive) as bundle:
             items = bundle.getmembers()
             names = {item.name for item in items}
-            if (len(items) > 103 or len(names) != len(items)
+            if (len(items) > 104 or len(names) != len(items)
                     or not {"account.tar", "workspace.sqlite3", "manifest.json"} <= names
                     or sum(item.size for item in items) > LIMIT):
                 raise ValueError("Unexpected snapshot entries")
             for item in items:
-                allowed = item.name in {"account.tar", "workspace.sqlite3", "manifest.json"} or re.fullmatch(r"deliveries/[a-f0-9]{32}\.(?:epub|txt|mobi|pdf)", item.name)
-                if not item.isfile() or not allowed or item.size > LIMIT:
+                allowed = item.name in {"account.tar", "workspace.sqlite3", "manifest.json", "catalog.csv.gz"} or re.fullmatch(r"deliveries/[a-f0-9]{32}\.(?:epub|txt|mobi|pdf)", item.name)
+                if not item.isfile() or not allowed or item.size > (FEED_LIMIT if item.name == "catalog.csv.gz" else LIMIT):
                     raise ValueError("Unsafe snapshot entries")
                 path = directory / item.name
                 path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -152,8 +161,15 @@ def restore(source: Path, destination: Path, passphrase: str) -> dict:
         if (manifest.get("format") != 1 or _hash(directory / "account.tar") != manifest.get("account_sha256")
                 or _hash(directory / "workspace.sqlite3") != manifest.get("workspace_sha256")):
             raise ValueError("Snapshot contents failed verification")
+        catalog = manifest.get("catalog")
+        if ("catalog.csv.gz" in names) != (catalog is not None):
+            raise ValueError("Catalogue inventory does not match the snapshot")
+        if catalog is not None and (not isinstance(catalog, dict)
+                or _hash(directory / "catalog.csv.gz") != catalog.get("sha256")
+                or type(catalog.get("fetched_at")) is not int or catalog["fetched_at"] < 0):
+            raise ValueError("A catalogue failed its snapshot checksum or timestamp")
         deliveries = manifest.get("deliveries", {})
-        if not isinstance(deliveries, dict) or {"deliveries/" + name for name in deliveries} != names - {"account.tar", "workspace.sqlite3", "manifest.json"}:
+        if not isinstance(deliveries, dict) or {"deliveries/" + name for name in deliveries} != names - {"account.tar", "workspace.sqlite3", "manifest.json", "catalog.csv.gz"}:
             raise ValueError("Delivery inventory does not match the snapshot")
         for filename, digest in deliveries.items():
             if _hash(directory / "deliveries" / filename) != digest:
@@ -172,6 +188,12 @@ def restore(source: Path, destination: Path, passphrase: str) -> dict:
         state = staged / "state"
         state.mkdir(mode=0o700)
         shutil.copy2(directory / "workspace.sqlite3", state / "workspace.sqlite3")
+        if catalog is not None:
+            cached = state / "catalog" / "catalog.csv.gz"
+            cached.parent.mkdir(mode=0o700)
+            shutil.copy2(directory / "catalog.csv.gz", cached)
+            fetched_at = min(catalog["fetched_at"], int(time.time()))
+            os.utime(cached, (fetched_at, fetched_at))
         if deliveries:
             shutil.copytree(directory / "deliveries", state / "deliveries")
         staged.rename(destination)

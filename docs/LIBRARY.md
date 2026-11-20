@@ -8,14 +8,16 @@ Gutendex-compatible record shapes remain an internal adapter interface, but the 
 
 ## Discovery
 
-- On the first search, fetch the mirror's `pg_catalog.csv.gz` with a 20-second network budget and an 8 MiB compressed limit. Gzip CRC/truncation checks apply, and decompressed CSV is limited to 32 MiB.
+- On the first search, fetch the mirror's `pg_catalog.csv.gz` with a 25-second network budget and an unchanged 8 MiB compressed limit. Gzip CRC/truncation checks apply, and decompressed CSV is limited to 32 MiB.
 - Build a local SQLite index atomically, with at most 150,000 feed rows and bounded fields. Only text records are indexed. Partial downloads or invalid feeds never replace a usable index.
 - Search title and author separately, with case/accent folding, and support subject/bookshelf-category and language filtering. Queries are bound SQL parameters, never executable query fragments. Results are ordered by catalogue identifier, not claimed popularity.
 - Return up to six candidates per page. Fetch each candidate's actual RDF metadata with at most three concurrent reads and eight seconds per read. The catalogue CSV alone is **not** evidence of public-domain status or a downloadable format.
 - Require matching ebook identity and an unambiguous `Public domain in the USA.` rights statement. Advertise only format links actually present in that ebook's RDF metadata. Requested formats are filtered after verification; a page may therefore contain fewer than six matches. Candidate count is not presented as a guaranteed downloadable total.
 - Refresh the public index after seven days. If refresh fails, an existing readable copy may be used with a stale-copy notice. Metadata failures that leave some verified results are explicitly disclosed; total metadata failure is an error, not a fabricated empty catalogue.
 
-The public catalogue cache is rebuildable data and is not included in private identity/workspace snapshots. A restored hosting session can rebuild it on first use. This is a connected tool, not an offline ebook collection.
+The validated compressed public feed is saved privately beside the rebuildable SQLite index. Authenticated identity/workspace snapshots may carry this optional feed (at most 8 MiB), its SHA-256 digest and its original fetch time, but never need to carry the larger public SQLite index. Existing snapshots without a feed still restore. A fresh restored feed rebuilds the index locally instead of downloading the whole catalogue on every hosting restart. A stale restored feed is disclosed as stale if network refresh fails; restoring never makes old catalogue data look fresh. Corrupt cached feeds cannot bypass the parser and may be replaced only by a newly validated feed. Rights and formats still require fresh connected per-book RDF, so this is not an offline ebook collection.
+
+The feed-only 25-second budget stays within the transport's existing reviewed maximum. A measured 5.6 MB cold transfer took 19.4 seconds before index construction, leaving almost no margin within the previous 20-second feed budget. File downloads retain their separate 20-second budget and unchanged size cap. Diagnostics report source elapsed time and a cached index rebuild separately; a timeout remains a failed probe, not an automatic retry or an invented result.
 
 ## Delivery
 

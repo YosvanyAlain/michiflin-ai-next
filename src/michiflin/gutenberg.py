@@ -12,6 +12,7 @@ import time
 import unicodedata
 import zlib
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -24,6 +25,8 @@ from .public_http import PublicHttp
 MIRROR = "https://gutenberg.pglaf.org"
 HOSTS = frozenset({"gutenberg.pglaf.org"})
 FEED = MIRROR + "/cache/epub/feeds/pg_catalog.csv.gz"
+FEED_LIMIT = 8 * 1024 * 1024
+CATALOG_MAX_AGE = 7 * 86400
 PAGE_SIZE = 6
 NS = {"pg": "http://www.gutenberg.org/2009/pgterms/", "dc": "http://purl.org/dc/terms/",
       "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#"}
@@ -129,6 +132,7 @@ class GutenbergClient:
     def __init__(self, directory: Path) -> None:
         self.directory = directory
         self.database = directory / "catalog.sqlite3"
+        self.feed = directory / "catalog.csv.gz"
         self._lock = threading.Lock()
 
     def metadata(self, identifier: int) -> dict:
@@ -137,33 +141,28 @@ class GutenbergClient:
         url = f"{MIRROR}/cache/epub/{identifier}/pg{identifier}.rdf"
         return parse_metadata(fetch(url, limit=512000, seconds=8), identifier)
 
-    def _age(self) -> float:
-        if self.database.is_symlink():
+    def _age(self, path: Path | None = None) -> float:
+        path = self.database if path is None else path
+        if path.is_symlink():
             raise AppError("source_response_invalid")
         try:
-            return time.time() - self.database.stat().st_mtime
+            return time.time() - path.stat().st_mtime
         except FileNotFoundError:
             return float("inf")
 
-    def sync(self) -> None:
-        if self._age() < 7 * 86400:
-            return
-        if not self._lock.acquire(timeout=1):
-            raise AppError("source_rate_limited", retryable=True)
-        temporary = None
+    def _index(self, compressed: bytes, fetched_at: float, *, preserve_feed: bool) -> None:
+        temporary = cached = None
         try:
-            if self._age() < 7 * 86400:
-                return
-            compressed = fetch(FEED, limit=8 * 1024 * 1024)
+            if not 0 < len(compressed) <= FEED_LIMIT:
+                raise AppError("source_response_limit")
             with gzip.GzipFile(fileobj=io.BytesIO(compressed)) as archive:
                 raw = archive.read(32 * 1024 * 1024 + 1)
             if len(raw) > 32 * 1024 * 1024:
                 raise AppError("source_response_limit")
-            self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
             fd, name = tempfile.mkstemp(prefix="catalog-", suffix=".sqlite3", dir=self.directory)
             os.close(fd)
             temporary = Path(name)
-            with sqlite3.connect(temporary) as db:
+            with closing(sqlite3.connect(temporary)) as db:
                 db.execute("CREATE TABLE books(id INTEGER PRIMARY KEY,title TEXT,author TEXT,topic TEXT,language TEXT)")
                 rows = csv.DictReader(io.StringIO(raw.decode("utf-8-sig"), newline=""), strict=True)
                 if not {"Text#", "Type", "Title", "Authors", "Language", "Subjects", "Bookshelves"} <= set(rows.fieldnames or []):
@@ -186,12 +185,53 @@ class GutenbergClient:
                 if not count:
                     raise AppError("source_response_invalid")
                 db.commit()
+            os.utime(temporary, (fetched_at, fetched_at))
+            if preserve_feed:
+                fd, name = tempfile.mkstemp(prefix="catalog-", suffix=".csv.gz", dir=self.directory)
+                cached = Path(name)
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(compressed)
+                os.utime(cached, (fetched_at, fetched_at))
+                cached.replace(self.feed)
             temporary.replace(self.database)
         except (OSError, EOFError, ValueError, csv.Error, sqlite3.Error, UnicodeError, zlib.error):
             raise AppError("source_response_invalid") from None
         finally:
-            if temporary:
-                temporary.unlink(missing_ok=True)
+            for path in (temporary, cached):
+                if path:
+                    path.unlink(missing_ok=True)
+
+    def sync(self) -> None:
+        if self._age() < CATALOG_MAX_AGE:
+            return
+        if not self._lock.acquire(timeout=1):
+            raise AppError("source_rate_limited", retryable=True)
+        try:
+            if self._age() < CATALOG_MAX_AGE:
+                return
+            self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            age = self._age(self.feed)
+            cached = None
+            if self.feed.is_file() and self.feed.stat().st_size <= FEED_LIMIT:
+                with self.feed.open("rb") as stream:
+                    cached = stream.read(FEED_LIMIT + 1)
+            if cached and age < CATALOG_MAX_AGE:
+                try:
+                    self._index(cached, self.feed.stat().st_mtime, preserve_feed=False)
+                    return
+                except AppError:
+                    pass
+            try:
+                compressed = fetch(FEED, limit=FEED_LIMIT, seconds=25)
+            except AppError:
+                if cached and not self.database.exists():
+                    self._index(cached, self.feed.stat().st_mtime, preserve_feed=False)
+                    return
+                raise
+            self._index(compressed, time.time(), preserve_feed=True)
+        except OSError:
+            raise AppError("source_response_invalid") from None
+        finally:
             self._lock.release()
 
     def get(self, url: str, params: dict | None = None) -> dict:
@@ -203,6 +243,7 @@ class GutenbergClient:
         stale = False
         try:
             self.sync()
+            stale = self._age() >= CATALOG_MAX_AGE
         except AppError:
             if not self.database.is_file() or self.database.is_symlink():
                 raise
@@ -221,7 +262,7 @@ class GutenbergClient:
             raise AppError("invalid_page")
         clause = " AND ".join(where)
         try:
-            with sqlite3.connect(f"file:{self.database}?mode=ro", uri=True, timeout=2) as db:
+            with closing(sqlite3.connect(self.database.resolve().as_uri() + "?mode=ro", uri=True, timeout=2)) as db:
                 count = db.execute("SELECT COUNT(*) FROM books WHERE " + clause, values).fetchone()[0]
                 identifiers = [row[0] for row in db.execute("SELECT id FROM books WHERE " + clause + " ORDER BY id LIMIT ? OFFSET ?", [*values, PAGE_SIZE, (page - 1) * PAGE_SIZE])]
         except sqlite3.Error:

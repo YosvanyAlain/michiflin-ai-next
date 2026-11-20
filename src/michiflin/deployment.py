@@ -19,6 +19,7 @@ import requests
 
 from .backup import LIMIT, create, restore
 from .egress import source_proxy
+from .gutenberg import GutenbergClient
 from .storage import Ledger
 
 TAG = "michiflin-next-checkpoints-v1"
@@ -189,7 +190,8 @@ def checkpoint(store: PrivateStore, release: dict, runtime: Path, directory: Pat
         raise ValueError("The remote checkpoint digest does not match")
     restore(downloaded, directory / "remote-verification", passphrase)
     manifest = {"format": 1, "asset_id": asset["id"], "sha256": metadata["sha256"],
-                "revision": revision, "session": stem, "verified_at": int(time.time())}
+                "revision": revision, "session": stem, "verified_at": int(time.time()),
+                "catalog_bytes": metadata.get("catalog_bytes", 0)}
     marker = directory / (stem + ".verified.json")
     marker.write_text(json.dumps(manifest))
     marker.chmod(0o600)
@@ -198,7 +200,8 @@ def checkpoint(store: PrivateStore, release: dict, runtime: Path, directory: Pat
     return manifest
 
 
-def execute(*, validate_only: bool, duration: int, directory: Path, source: Path) -> dict:
+def execute(*, validate_only: bool, duration: int, directory: Path, source: Path,
+            prepare_catalog: bool = False) -> dict:
     revision = os.environ.get("MICHIFLIN_DEPLOY_REVISION", "")
     if not re.fullmatch(r"[a-f0-9]{40}", revision):
         raise ValueError("An exact deployment revision is required")
@@ -229,6 +232,8 @@ def execute(*, validate_only: bool, duration: int, directory: Path, source: Path
                 raise ValueError("The selected snapshot digest does not match")
             runtime = work / "runtime"
             restore(downloaded, runtime, passphrase)
+            if prepare_catalog:
+                GutenbergClient(runtime / "state" / "catalog").sync()
             stem = ("validation-" if validate_only else "session-") + uuid.uuid4().hex
             if not validate_only:
                 marker = work / (stem + ".running.json")
@@ -258,12 +263,14 @@ def main() -> None:
     os.umask(0o077)
     parser = argparse.ArgumentParser(description="Run a bounded private session with fail-closed checkpoint recovery")
     parser.add_argument("--validate-only", action="store_true", help="Verify real backup/restore without starting mail IO")
+    parser.add_argument("--prepare-catalog", action="store_true", help="Explicitly prepare the bounded public feed before checkpointing or starting IO")
     parser.add_argument("--duration", type=int, default=19200)
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--source", type=Path, default=Path("miniapp"))
     args = parser.parse_args()
     try:
-        execute(validate_only=args.validate_only, duration=args.duration, directory=args.directory, source=args.source)
+        execute(validate_only=args.validate_only, duration=args.duration, directory=args.directory, source=args.source,
+                prepare_catalog=args.prepare_catalog)
     except Exception:
         print("Private session stopped safely. No automatic rollback or unverified restart was attempted.", file=sys.stderr)
         raise SystemExit(1) from None

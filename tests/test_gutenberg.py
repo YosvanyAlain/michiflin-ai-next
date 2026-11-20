@@ -113,6 +113,7 @@ def test_catalogue_refresh_is_atomic_and_old_copy_is_explicitly_stale(source):
     original = client.database.read_bytes()
     old = time.time() - 8 * 86400
     os.utime(client.database, (old, old))
+    os.utime(client.feed, (old, old))
     fetch.return_value = gzip.compress(b'not the expected csv')
     result = client.get('https://gutendex.com/books/', {'title': 'Pride'})
     assert result['catalog_stale'] and result['results']
@@ -202,3 +203,51 @@ def test_model_openlibrary_tool_keeps_its_separate_catalogue_client(source):
     assert public.get.call_args.args[0] == 'https://openlibrary.org/search.json'
     feed.assert_not_called()
     metadata.assert_not_called()
+
+
+def test_fresh_compressed_feed_rebuilds_a_missing_index_without_bulk_network(source):
+    client, fetch, _ = source
+    client.sync()
+    assert client.feed.stat().st_mode & 0o077 == 0
+    assert fetch.call_args.kwargs == {'limit': 8 * 1024 * 1024, 'seconds': 25}
+    fetched_at = client.feed.stat().st_mtime
+    client.database.unlink()
+    fetch.reset_mock()
+    client.sync()
+    fetch.assert_not_called()
+    assert client.database.stat().st_mtime == fetched_at
+
+
+def test_stale_restored_feed_can_rebuild_only_with_a_stale_disclosure(source):
+    client, fetch, _ = source
+    client.sync()
+    client.database.unlink()
+    old = time.time() - 8 * 86400
+    os.utime(client.feed, (old, old))
+    fetch.side_effect = AppError('source_unavailable')
+    result = client.get('https://gutendex.com/books/', {'title': 'Pride'})
+    assert result['catalog_stale'] and result['results']
+    assert client.database.stat().st_mtime == old
+
+
+def test_corrupt_fresh_cache_is_replaced_only_after_a_valid_network_feed(source):
+    client, fetch, _ = source
+    client.sync()
+    client.database.unlink()
+    client.feed.write_bytes(b'corrupt gzip')
+    client.sync()
+    assert gzip.decompress(client.feed.read_bytes()) == CSV.encode()
+    assert fetch.call_count == 2
+
+
+def test_symlinked_compressed_feed_is_not_read_or_replaced(tmp_path, monkeypatch):
+    private = tmp_path / 'private'
+    private.write_bytes(b'private synthetic data')
+    client = GutenbergClient(tmp_path)
+    client.feed.symlink_to(private)
+    fetch = Mock()
+    monkeypatch.setattr(gutenberg, 'fetch', fetch)
+    with pytest.raises(AppError):
+        client.sync()
+    fetch.assert_not_called()
+    assert private.read_bytes() == b'private synthetic data'
