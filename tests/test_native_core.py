@@ -55,6 +55,18 @@ def test_native_core_identity_package_status_and_encrypted_restore(tmp_path):
         adapter.status_update(instance)
         assert len(json.loads(rpc.get_webxdc_status_updates(bot, instance, 0))) == len(updates)
 
+        delivery_dir = service.settings.state_dir / "deliveries"
+        delivery_dir.mkdir(mode=0o700)
+        book = delivery_dir / "synthetic.txt"
+        book.write_text("Synthetic public-domain text for native delivery testing.")
+        receipt = "d" * 32
+        service.ledger.queue_delivery(receipt, principal.storage_key, chat, instance, book.name, "Synthetic book", book.stat().st_size)
+        adapter.deliver(receipt, principal, instance)
+        status = service.ledger.delivery_status(receipt, principal.storage_key)
+        assert status["status"] == "sent" and status["message_id"]
+        delivered = rpc.get_message(bot, status["message_id"])
+        assert delivered.show_padlock and delivered.file and not book.exists()
+
         backup_dir = tmp_path / "backups"
         backup_dir.mkdir(mode=0o700)
         passphrase = "synthetic-test-only-not-a-production-secret"

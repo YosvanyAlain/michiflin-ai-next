@@ -16,6 +16,7 @@ class Settings:
     admin_keys: dict[str, str] = field(default_factory=dict, repr=False)
     online_providers: tuple[dict, ...] = field(default=(), repr=False)
     local_model_url: str = ""
+    local_model_key: str = field(default="", repr=False)
     contact: str = ""
 
     @classmethod
@@ -46,5 +47,6 @@ class Settings:
             admin_keys=admins,
             online_providers=tuple(providers),
             local_model_url=os.getenv("MICHIFLIN_LOCAL_MODEL_URL", ""),
+            local_model_key=os.getenv("MICHIFLIN_LOCAL_MODEL_KEY", ""),
             contact=os.getenv("MICHIFLIN_SERVICE_CONTACT", ""),
         )

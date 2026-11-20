@@ -31,6 +31,8 @@ window.webxdc={
 
 class SourceFixture:
     def get(self, url, params=None):
+        if "gutendex" in url and url.endswith("/123/"):
+            return {"id": 123, "copyright": False, "title": "Synthetic Book", "formats": {"application/epub+zip": "https://www.gutenberg.org/ebooks/123.epub"}}
         if "gutendex" in url:
             return {"count": 1, "next": None, "results": [{"id": 123, "title": "Synthetic Book", "authors": [{"name": "Synthetic Writer"}], "copyright": False, "languages": ["en"], "formats": {"application/epub+zip": "https://www.gutenberg.org/ebooks/123.epub.images"}}]}
         if "geocoding" in url:
@@ -76,7 +78,12 @@ def browser(tmp_path, locale="en", engine="chromium", connected=True):
             page.route("**/webxdc.js", lambda route: route.fulfill(status=200, content_type="text/javascript", body=WIRE if connected else ""))
             page.goto(f"http://127.0.0.1:{server.server_port}/index.html")
             if connected:
-                page.wait_for_function("window.Michiflin.transport.ready")
+                page.evaluate("""()=>new Promise((resolve,reject)=>{
+                  if(Michiflin.transport.ready){resolve();return;}
+                  const timer=setTimeout(()=>{document.removeEventListener('michiflin:transport',listener);reject(new Error('Handshake timed out'));},30000);
+                  const listener=()=>{if(Michiflin.transport.ready){clearTimeout(timer);document.removeEventListener('michiflin:transport',listener);resolve();}};
+                  document.addEventListener('michiflin:transport',listener);
+                })""")
             try:
                 yield page, errors
             finally:
@@ -215,4 +222,76 @@ def test_chunked_response_is_order_independent_and_identity_bound(tmp_path):
         task = page.evaluate("id=>Michiflin.transport.tasks.find(item=>item.id===id)", identifier)
         assert task["status"] == "done"
         assert task["data"] == body["data"]
+        assert errors == []
+
+
+def test_book_delivery_requires_explicit_confirmation_and_returns_a_receipt(tmp_path, monkeypatch):
+    import io
+    import zipfile
+
+    from michiflin import downloads
+
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip")
+    monkeypatch.setattr(downloads, "fetch_bytes", lambda _: stream.getvalue())
+    with browser(tmp_path) as (page, errors):
+        page.evaluate("location.hash='library'")
+        page.locator(".library-filters button").click()
+        page.locator(".book-card").wait_for()
+        page.get_by_role("button", name="Receive in chat").click()
+        assert page.locator("dialog[open]").is_visible()
+        assert "USA" in page.locator("dialog[open]").inner_text()
+        assert not page.evaluate("window.__requests.some(item=>item.op==='library.deliver')")
+        page.get_by_role("button", name="Send this edition").click()
+        page.evaluate("location.hash='activity'")
+        page.get_by_text("Queued for this encrypted chat.", exact=True).wait_for()
+        request = page.evaluate("window.__requests.find(item=>item.op==='library.deliver')")
+        assert request["args"] == {"book": 123, "format": "epub"}
+        assert errors == []
+
+
+@pytest.mark.parametrize("engine", ["chromium", "webkit"])
+def test_extended_utilities_are_local_and_handle_unicode_and_calendar_edges(tmp_path, engine):
+    with browser(tmp_path, engine=engine, connected=False) as (page, errors):
+        result = page.evaluate("""()=>{
+          const E=Michiflin.extras;
+          const input='Hola 🐈 café';
+          let malformed=false;
+          try{E.dateDays('2026-02-30','2026-03-01');}catch{malformed=true;}
+          return {savings:E.compound(1000,50,0,10),days:E.dateDays('2026-03-01','2026-03-31'),
+                  unicode:E.encode(E.encode(input,'base64_encode'),'base64_decode'),malformed};
+        }""")
+        assert result == {"savings": {"balance": 7000, "contributions": 7000, "interest": 0},
+                          "days": 30, "unicode": "Hola 🐈 café", "malformed": True}
+        for route in ("finance", "date_math", "encoding", "file_inspector", "image_lab"):
+            page.evaluate("route=>{location.hash=route}", route)
+            page.locator(".tool-workbench").wait_for()
+            assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1")
+        assert page.evaluate("Michiflin.transport.tasks.length") == 0
+        assert errors == []
+
+
+def test_file_fingerprint_and_image_optimizer_do_not_upload_inputs(tmp_path):
+    import hashlib
+
+    from PIL import Image
+
+    text = tmp_path / "example.txt"
+    text.write_bytes(b"hello")
+    image = tmp_path / "example.png"
+    Image.new("RGB", (100, 80), "#ada2de").save(image)
+    with browser(tmp_path, connected=False) as (page, errors):
+        page.evaluate("location.hash='file_inspector'")
+        page.locator("input[type=file]").set_input_files(text)
+        page.get_by_role("button", name="Compute fingerprint").click()
+        page.get_by_text(hashlib.sha256(b"hello").hexdigest(), exact=False).wait_for()
+        page.evaluate("location.hash='image_lab'")
+        page.locator("input[type=file]").set_input_files(image)
+        page.locator("input[type=number]").first.fill("64")
+        page.get_by_role("button", name="Optimize on this device").click()
+        page.locator(".tool-output img").wait_for()
+        assert "64 × 51" in page.locator(".tool-output").inner_text()
+        assert page.get_by_role("link", name="Save JPEG").get_attribute("download") == "michiflin-image.jpg"
+        assert page.evaluate("Michiflin.transport.tasks.length") == 0
         assert errors == []

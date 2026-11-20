@@ -35,6 +35,12 @@ class Ledger:
                 );
             """)
             db.executescript("""
+                CREATE TABLE IF NOT EXISTS outbox (
+                    receipt TEXT PRIMARY KEY, owner TEXT NOT NULL, chat INTEGER NOT NULL,
+                    instance INTEGER NOT NULL, filename TEXT NOT NULL, title TEXT NOT NULL,
+                    bytes INTEGER NOT NULL, state TEXT NOT NULL, created REAL NOT NULL,
+                    message_id INTEGER
+                );
                 CREATE TABLE IF NOT EXISTS cursors(instance INTEGER PRIMARY KEY, serial INTEGER NOT NULL);
                 CREATE TABLE IF NOT EXISTS deliveries(owner TEXT NOT NULL, created REAL NOT NULL);
                 CREATE INDEX IF NOT EXISTS deliveries_owner_time ON deliveries(owner,created);
@@ -138,6 +144,7 @@ class Ledger:
         """Call once after acquiring the exclusive runtime lock, before serving."""
         with self.transaction() as db:
             db.execute("UPDATE requests SET state='uncertain',updated=? WHERE state='running'", (time.time(),))
+            db.execute("UPDATE outbox SET state='uncertain' WHERE state='sending'")
 
     def has_instance(self, instance: int) -> bool:
         with self.connection() as db:
@@ -168,3 +175,46 @@ class Ledger:
     def revoke(self, instance: int) -> None:
         with self.transaction() as db:
             db.execute("UPDATE instances SET revoked=1 WHERE id=?", (instance,))
+
+    def _check_delivery_capacity(self, db, owner: str) -> None:
+        since = time.time() - 86400
+        own = db.execute("SELECT COUNT(*) FROM outbox WHERE owner=? AND created>?", (owner, since)).fetchone()[0]
+        total = db.execute("SELECT COUNT(*) FROM outbox WHERE created>?", (since,)).fetchone()[0]
+        pending = db.execute("SELECT COUNT(*) FROM outbox WHERE state IN ('queued','sending')").fetchone()[0]
+        if own >= 8 or total >= 100 or pending >= 20:
+            raise AppError("delivery_limit")
+
+    def check_delivery_capacity(self, owner: str) -> None:
+        with self.connection() as db:
+            self._check_delivery_capacity(db, owner)
+
+    def queue_delivery(self, receipt: str, owner: str, chat: int, instance: int,
+                       filename: str, title: str, size: int) -> None:
+        with self.transaction() as db:
+            self._check_delivery_capacity(db, owner)
+            db.execute("INSERT INTO outbox VALUES(?,?,?,?,?,?,?,'queued',?,NULL)",
+                       (receipt, owner, chat, instance, filename, title, size, time.time()))
+
+    def claim_delivery(self, receipt: str, owner: str) -> dict | None:
+        with self.transaction() as db:
+            row = db.execute("SELECT * FROM outbox WHERE receipt=? AND owner=? AND state='queued'",
+                             (receipt, owner)).fetchone()
+            if row is None:
+                return None
+            db.execute("UPDATE outbox SET state='sending' WHERE receipt=?", (receipt,))
+            return dict(row)
+
+    def delivery_status(self, receipt: object, owner: str) -> dict:
+        if not isinstance(receipt, str) or len(receipt) != 32:
+            raise AppError("invalid_delivery")
+        with self.connection() as db:
+            row = db.execute("SELECT receipt,state AS status,title,bytes,message_id FROM outbox WHERE receipt=? AND owner=?",
+                             (receipt, owner)).fetchone()
+            if row is None:
+                raise AppError("invalid_delivery")
+            return dict(row)
+
+    def finish_delivery(self, receipt: str, message_id: int | None) -> None:
+        with self.transaction() as db:
+            db.execute("UPDATE outbox SET state=?,message_id=? WHERE receipt=? AND state='sending'",
+                       ("sent" if message_id else "uncertain", message_id, receipt))

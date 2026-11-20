@@ -119,8 +119,35 @@ class DeltaAdapter:
                     cursor = serial
                     continue
                 response = self.service.handle(principal, instance, request)
+                if request.get("op") == "library.deliver" and response.get("ok"):
+                    receipt = response["data"]["receipt"]
+                    self.deliver(receipt, principal, instance)
+                    response = {**response, "data": {**response["data"], **self.service.ledger.delivery_status(receipt, principal.storage_key)}}
                 for frame in encode_response(response):
                     self.rpc.send_webxdc_status_update(
                         self.account, instance, json.dumps({"payload": frame}, allow_nan=False), "")
             self.service.ledger.checkpoint(instance, serial)
             cursor = serial
+
+    def deliver(self, receipt: str, principal: Principal, instance: int) -> None:
+        from deltachat2 import MessageData
+
+        row = self.service.ledger.claim_delivery(receipt, principal.storage_key)
+        if row is None:
+            return
+        try:
+            current = self.principal(principal.chat_id, encrypted=True)
+            if current.storage_key != principal.storage_key or row["instance"] != instance or row["chat"] != principal.chat_id:
+                raise AppError("identity_unavailable")
+            directory = (self.service.settings.state_dir / "deliveries").resolve()
+            file = directory / row["filename"]
+            if file.is_symlink() or not file.is_file() or file.resolve().parent != directory or file.stat().st_size != row["bytes"]:
+                raise AppError("download_invalid")
+            message_id = self.rpc.send_msg(self.account, principal.chat_id, MessageData(
+                file=str(file), filename="Michiflin-book" + file.suffix,
+                text=row["title"] + "\nProject Gutenberg · Public domain in the USA; check local rights."))
+        except Exception:
+            self.service.ledger.finish_delivery(receipt, None)
+            return
+        self.service.ledger.finish_delivery(receipt, message_id)
+        file.unlink(missing_ok=True)

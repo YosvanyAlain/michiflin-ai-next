@@ -14,3 +14,9 @@ state/
 private/
 artifacts/
 node_modules/
+
+.cache/
+*.gguf
+*.pem
+*.key
+*.sealed

@@ -61,6 +61,8 @@ def calculate(expression: object) -> dict:
 def convert(value: object, source: str, target: str) -> dict:
     if type(value) not in (int, float) or not math.isfinite(value) or abs(value) > 1e50:
         raise AppError("invalid_number")
+    if not isinstance(source, str) or not isinstance(target, str):
+        raise AppError("incompatible_units")
     if source in {"C", "F", "K"} and target in {"C", "F", "K"}:
         celsius = value if source == "C" else (value - 32) * 5 / 9 if source == "F" else value - 273.15
         if celsius < -273.15000001:

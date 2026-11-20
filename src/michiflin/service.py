@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from . import __version__, library, utilities, weather
+from . import __version__, agent, downloads, library, utilities, weather
 from .config import Settings
 from .errors import AppError
 from .identity import Principal
@@ -20,6 +20,7 @@ from .storage import Ledger
 class Operation:
     run: Callable[[Principal, dict, str], dict]
     admin: bool = False
+    instance: bool = False
 
 
 class Service:
@@ -32,6 +33,9 @@ class Service:
         self.started = time.monotonic()
         self.operations = {
             "library.search": Operation(lambda _p, args, _l: library.search(self.client, library.BookQuery.parse(args))),
+            "library.deliver": Operation(lambda p, args, _l, instance: downloads.prepare(
+                self.client, self.ledger, settings.state_dir / "deliveries", p, instance, args), instance=True),
+            "delivery.status": Operation(lambda p, args, _l: self.ledger.delivery_status(args.get("receipt"), p.storage_key)),
             "weather.locations": Operation(lambda _p, args, locale: weather.locations(self.client, args.get("query", ""), locale)),
             "weather.forecast": Operation(lambda _p, args, _l: weather.forecast(self.client, args.get("latitude"), args.get("longitude"))),
             "utilities.calculate": Operation(lambda _p, args, _l: utilities.calculate(args.get("expression"))),
@@ -40,7 +44,10 @@ class Service:
             "notes.list": Operation(lambda principal, _a, _l: {"notes": self.ledger.notes(principal.storage_key)}),
             "notes.add": Operation(lambda principal, args, _l: {"id": self.ledger.add_note(principal.storage_key, args.get("text", ""))}),
             "notes.delete": Operation(lambda principal, args, _l: {"deleted": self.ledger.delete_note(principal.storage_key, args.get("id"))}),
-            "assistant.ask": Operation(lambda _p, args, _l: self.models.complete(args.get("text"), args.get("model", "local"), args.get("history", []), local_only=args.get("local_only") is True)),
+            "assistant.ask": Operation(lambda _p, args, locale: self.models.complete(
+                args.get("text"), args.get("model", "local"), args.get("history", []), local_only=args.get("local_only") is True,
+                toolset=agent.tools(self.client, local_only=args.get("local_only") is True or args.get("model") == "local", locale=locale)
+                if args.get("use_tools") is True else None)),
             "admin.health": Operation(lambda _p, _a, _l: {"version": __version__, "uptime": round(time.monotonic() - self.started), "public_access": self.settings.public_access}, admin=True),
         }
 
@@ -88,7 +95,7 @@ class Service:
             if cached:
                 return cached
             try:
-                result = operation.run(principal, args, locale)
+                result = operation.run(principal, args, locale, instance) if operation.instance else operation.run(principal, args, locale)
                 response = {"id": identifier, "ok": True, "data": result}
             except AppError as error:
                 response = {"id": identifier, "ok": False, "error": error.code, "retryable": error.retryable}
