@@ -11,6 +11,7 @@ from . import __version__, downloads, library, utilities, weather
 from .config import Settings
 from .errors import AppError
 from .identity import Principal
+from .media import Media
 from .models import ModelGateway
 from .network import JsonClient
 from .reader import Reader
@@ -31,6 +32,7 @@ class Service:
         self.client = client or JsonClient(contact=settings.contact)
         self.models = ModelGateway(settings)
         self.reader = Reader()
+        self.media = Media()
         self.session = secrets.token_urlsafe(24)
         self.started = time.monotonic()
         self.operations = {
@@ -38,6 +40,7 @@ class Service:
             "library.deliver": Operation(lambda p, args, _l, instance: downloads.prepare(
                 self.client, self.ledger, settings.state_dir / "deliveries", p, instance, args), instance=True),
             "delivery.status": Operation(lambda p, args, _l: self.ledger.delivery_status(args.get("receipt"), p.storage_key)),
+            "media.inspect": Operation(lambda _p, args, _l: self.media.inspect(args)),
             "web.read": Operation(lambda _p, args, _l: self.reader.read(args)),
             "weather.locations": Operation(lambda _p, args, locale: weather.locations(self.client, args.get("query", ""), locale)),
             "weather.forecast": Operation(lambda _p, args, _l: weather.forecast(self.client, args.get("latitude"), args.get("longitude"))),

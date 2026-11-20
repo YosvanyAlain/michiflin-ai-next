@@ -17,6 +17,7 @@ window.Michiflin = (() => {
     json:'<path d="M8 3H6v7l-3 2 3 2v7h2m8-18h2v7l3 2-3 2v7h-2"/>',
     world_clock:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a18 18 0 0 1 0 18 18 18 0 0 1 0-18"/>',
     weather:'<circle cx="8" cy="8" r="4"/><path d="M8 1v1M1 8h1m2-4-1-1M16 8h-1M8 15v1m-4-4-1 1m14-1a5 5 0 0 0-9 3 3 3 0 0 0 0 6h10a4 4 0 0 0-1-9Z"/>',
+    youtube:'<rect x="2" y="5" width="20" height="14" rx="4"/><path d="m10 9 5 3-5 3Z"/>',
     reader:'<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 7h8M8 11h8M8 15h6M8 19h4"/>',
     notes:'<rect x="4" y="3" width="16" height="19" rx="3"/><path d="M8 2v3m8-3v3M8 10h8m-8 4h8m-8 4h5"/>',
     copy:'<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>',

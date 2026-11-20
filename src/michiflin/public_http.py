@@ -19,6 +19,7 @@ from .egress import source_proxy
 from .errors import AppError
 
 MAX_BYTES = 1_000_000
+PAGE_TYPES = frozenset({"text/html", "application/xhtml+xml", "text/plain"})
 _RESOLVER = """import json,socket,sys
 print(json.dumps(sorted({x[4][0] for x in socket.getaddrinfo(sys.argv[1],443,type=socket.SOCK_STREAM)})))
 """
@@ -146,8 +147,9 @@ class Document:
 class PublicHttp:
     """Cookie-free HTTPS reads pinned to vetted public addresses, including through SOCKS."""
 
-    def get(self, url: object) -> Document:
+    def get(self, url: object, *, json_response: bool = False) -> Document:
         url = normalize_url(url)
+        accepted_types = {"application/json"} if json_response else PAGE_TYPES
         proxy = source_proxy()
         deadline = time.monotonic() + 25
         visited = set()
@@ -167,7 +169,7 @@ class PublicHttp:
                 try:
                     connection.request("GET", urlunsplit(("", "", parsed.path, parsed.query, "")), headers={
                         "User-Agent": "Michiflin/0.1 (user-requested text reader)",
-                        "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9",
+                        "Accept": "application/json" if json_response else "text/html,application/xhtml+xml,text/plain;q=0.9",
                         "Accept-Encoding": "gzip", "Connection": "close",
                     })
                     with connection.getresponse() as response:
@@ -184,7 +186,7 @@ class PublicHttp:
                         if response.status != 200:
                             raise AppError("web_source_unavailable", retryable=True)
                         content_type = response.getheader("Content-Type", "").strip().lower()
-                        if content_type.split(";", 1)[0].strip() not in {"text/html", "application/xhtml+xml", "text/plain"}:
+                        if content_type.split(";", 1)[0].strip() not in accepted_types:
                             raise AppError("web_format_unsupported")
                         length = response.getheader("Content-Length")
                         if length is not None and (not length.isdecimal() or int(length) > MAX_BYTES):

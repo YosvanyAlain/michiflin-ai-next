@@ -281,3 +281,13 @@ def test_deadline_abort_during_tls_handshake_shuts_down_the_live_tls_socket(monk
         connection.connect()
     assert connection.aborted
     secured.shutdown.assert_called_with(socket.SHUT_RDWR)
+
+
+def test_json_mode_is_explicit_and_keeps_default_reader_content_types_strict(transport):
+    responses, calls, _ = transport
+    responses.append(Response(body=b'{"type":"video"}', **{'Content-Type': 'application/json'}))
+    data = web.PublicHttp().get('https://www.youtube.com/oembed', json_response=True)
+    assert data.body == b'{"type":"video"}' and calls[0]['headers']['Accept'] == 'application/json'
+    responses.append(Response(body=b'{"type":"video"}', **{'Content-Type': 'application/json'}))
+    with pytest.raises(AppError, match='web_format_unsupported'):
+        web.PublicHttp().get('https://example.com/data')

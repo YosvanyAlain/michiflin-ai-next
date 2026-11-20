@@ -6,6 +6,10 @@ on:
         description: Route public source probes through verified local WARP
         type: boolean
         default: false
+      check_media:
+        description: Query actual YouTube metadata, not a video download
+        type: boolean
+        default: true
       check_reader:
         description: Fetch and parse a real public web page
         type: boolean
@@ -32,12 +36,14 @@ jobs:
         run: bash tools/setup_warp.sh
       - name: Probe public sources, reader and optional ebook delivery
         env:
+          CHECK_MEDIA: ${{ inputs.check_media }}
           CHECK_READER: ${{ inputs.check_reader }}
           CHECK_DOWNLOAD: ${{ inputs.check_download }}
         run: |
           args=()
           if [ "$CHECK_DOWNLOAD" = true ]; then args+=(--download); fi
           if [ "$CHECK_READER" = true ]; then args+=(--reader); fi
+          if [ "$CHECK_MEDIA" = true ]; then args+=(--media); fi
           python -m michiflin.diagnostics "${args[@]}"
       - name: Disconnect WARP
         if: always() && inputs.use_warp

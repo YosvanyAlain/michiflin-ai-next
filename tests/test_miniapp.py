@@ -44,8 +44,10 @@ class SourceFixture:
 
 
 @contextmanager
-def browser(tmp_path, locale="en", engine="chromium", connected=True, reader_source=None):
+def browser(tmp_path, locale="en", engine="chromium", connected=True, reader_source=None, media_source=None):
     service = Service(Settings(state_dir=tmp_path / "state"), SourceFixture())
+    if media_source is not None:
+        service.media.client = media_source
     if reader_source is not None:
         service.reader.client = reader_source
     principal = Principal("synthetic@example.invalid", "A" * 40, 20, True, True)
@@ -103,7 +105,7 @@ def test_responsive_bilingual_workspace(tmp_path, engine, locale):
         assert page.locator(".feature-hero").is_visible()
         for width in [320, 390, 768, 1024, 1440]:
             page.set_viewport_size({"width": width, "height": 844})
-            for route in ["home", "library", "utilities", "weather", "assistant", "activity", "calculator", "reader"]:
+            for route in ["home", "library", "utilities", "weather", "assistant", "activity", "calculator", "reader", "youtube"]:
                 page.evaluate("route=>{location.hash=route}", route)
                 page.wait_for_timeout(25)
                 assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1"), (width, route)
@@ -351,7 +353,7 @@ def test_compact_catalogue_filters_search_and_keeps_tools_accessible(tmp_path, e
             page.set_viewport_size({"width": width, "height": 844})
             page.evaluate("location.hash='utilities'")
             page.locator(".utility-toolbar").wait_for()
-            assert page.locator(".tool-card").count() == 17
+            assert page.locator(".tool-card").count() == 18
             assert page.locator(".tool-card p").count() == 0
             assert page.locator(".tool-card").first.bounding_box()["height"] <= 105
             page.locator('[data-group="files"]').click()
@@ -361,7 +363,7 @@ def test_compact_catalogue_filters_search_and_keeps_tools_accessible(tmp_path, e
             assert page.locator(".tool-card").count() == 1
             page.locator('.utility-search input').fill("")
             page.locator('[data-group="all"]').click()
-            assert page.locator(".tool-card").count() == 17
+            assert page.locator(".tool-card").count() == 18
             assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1")
             page.evaluate("location.hash='home'")
             page.locator(".feature-hero").wait_for()

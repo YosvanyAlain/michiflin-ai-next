@@ -5,7 +5,7 @@ import zipfile
 from pathlib import Path
 
 _REQUIRED = {"index.html", "manifest.toml", "icon.png", "app.js", "ui.js", "transport.js", "offline.js",
-             "extras.js", "files.js", "filetools.js", "reader.js", "locales/en.js", "locales/es.js", "styles/workspace.css", "assets/mark.svg", "assets/michiflin-night.jpg"}
+             "extras.js", "files.js", "filetools.js", "reader.js", "media.js", "locales/en.js", "locales/es.js", "styles/workspace.css", "assets/mark.svg", "assets/michiflin-night.jpg"}
 
 
 def build(source: Path, destination: Path) -> Path:

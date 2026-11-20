@@ -366,5 +366,16 @@ window.MichiflinLocales.en = {
   "web_access_restricted": "The site restricts access. Login, payment and other access controls are not bypassed.",
   "web_format_unsupported": "Use an HTML or plain-text page in a supported encoding, not a file download.",
   "web_content_invalid": "The page response was incomplete or invalid.",
-  "web_no_readable_text": "No readable text was found. This page may need JavaScript or a login."
+  "web_no_readable_text": "No readable text was found. This page may need JavaScript or a login.",
+  "youtube": "YouTube preview",
+  "youtube_desc": "Look up the title and channel. No downloads yet.",
+  "media_url": "Public YouTube video link",
+  "media_lookup": "Look up video",
+  "media_channel": "Channel",
+  "media_preview_only": "Metadata preview only. Download, audio, captions, duration and quality selection are not available yet.",
+  "media_open_source": "Open on YouTube",
+  "media_privacy": "The bot queries public metadata without your cookies or login. No embedded player, images or video are loaded.",
+  "invalid_youtube_url": "Use a public HTTPS YouTube video, Shorts or youtu.be link, not a playlist or channel.",
+  "media_metadata_invalid": "YouTube did not return valid video metadata.",
+  "media_source_unavailable": "YouTube metadata is unavailable. The video may be private, removed or blocked from this host."
 };

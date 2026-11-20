@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from . import downloads, library, weather
 from .errors import AppError
+from .media import Media
 from .network import JsonClient
 from .reader import Reader
 
@@ -56,16 +57,27 @@ def check_reader() -> dict:
         return {"ok": False, "error": error.code}
 
 
+def check_media() -> dict:
+    try:
+        data = Media().inspect({"url": "https://www.youtube.com/watch?v=BaW_jenozKc"})
+        return {"ok": True, "source": data["source"], "metadata_only": not data["download_available"]}
+    except AppError as error:
+        return {"ok": False, "error": error.code}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Probe actual public sources without private bot state.")
     parser.add_argument("--download", action="store_true", help="Fetch and validate a lawful public-domain EPUB.")
     parser.add_argument("--reader", action="store_true", help="Fetch and parse an actual public web page.")
+    parser.add_argument("--media", action="store_true", help="Fetch actual YouTube metadata, not video bytes.")
     args = parser.parse_args()
     results = check_sources()
     if args.download:
         results["gutenberg_epub"] = check_download()
     if args.reader:
         results["web_reader"] = check_reader()
+    if args.media:
+        results["youtube_metadata"] = check_media()
     print(json.dumps(results, indent=2))
     if not all(item["ok"] for item in results.values()):
         raise SystemExit(1)

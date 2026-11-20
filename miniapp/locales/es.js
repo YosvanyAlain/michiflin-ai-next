@@ -366,5 +366,16 @@ window.MichiflinLocales.es = {
   "web_access_restricted": "El sitio restringe el acceso. No se evitan inicios de sesión, pagos ni otros controles de acceso.",
   "web_format_unsupported": "Usa una página HTML o de texto con codificación compatible, no una descarga.",
   "web_content_invalid": "La respuesta de la página llegó incompleta o no es válida.",
-  "web_no_readable_text": "No se encontró texto legible. La página puede necesitar JavaScript o una sesión."
+  "web_no_readable_text": "No se encontró texto legible. La página puede necesitar JavaScript o una sesión.",
+  "youtube": "Vista de YouTube",
+  "youtube_desc": "Consulta el título y el canal. Aún sin descargas.",
+  "media_url": "Enlace a un vídeo público de YouTube",
+  "media_lookup": "Consultar vídeo",
+  "media_channel": "Canal",
+  "media_preview_only": "Solo una ficha de metadatos. Aún no hay descarga, audio, subtítulos, duración ni selección de calidad.",
+  "media_open_source": "Abrir en YouTube",
+  "media_privacy": "El bot consulta metadatos públicos sin tus cookies ni sesión. No se cargan reproductores, imágenes ni vídeo.",
+  "invalid_youtube_url": "Usa un enlace HTTPS de un vídeo, Short o youtu.be, no una lista ni un canal.",
+  "media_metadata_invalid": "YouTube no devolvió metadatos válidos del vídeo.",
+  "media_source_unavailable": "Los metadatos de YouTube no están disponibles. El vídeo puede ser privado, estar retirado o bloqueado desde este servidor."
 };

@@ -7,7 +7,7 @@ A new bilingual workspace for Delta Chat: thoughtful local utilities, an ebook d
 ## Implemented foundations
 
 - An independent, responsive miniapp with English and Spanish interfaces, light/dark themes, accessible navigation, and reduced-motion support. Compact tool cards support local search and category filters.
-- Seventeen utility cards: offline arithmetic, dimensional unit conversion, text tools, device-only passwords, JSON, world clocks, notes, savings projections, date differences, Unicode/Base64/URL encoding, local file checksums, private image optimization, CSV/JSON table conversion, ZIP/EPUB metadata inspection, PCM WAV editing, connected weather, and a low-bandwidth public web reader.
+- Eighteen utility cards: offline arithmetic, dimensional unit conversion, text tools, device-only passwords, JSON, world clocks, notes, savings projections, date differences, Unicode/Base64/URL encoding, local file checksums, private image optimization, CSV/JSON table conversion, ZIP/EPUB metadata inspection, PCM WAV editing, connected weather, a low-bandwidth public web reader, and explicitly metadata-only YouTube previews.
 - Project Gutenberg discovery through Gutendex, with title, writer, subject, language, and verified format filters. Open Library is a separate catalogue/loan source, never advertised as a guaranteed download.
 - Open-Meteo place disambiguation, modelled conditions, hourly forecasts, seven-day forecasts, and condition-driven weather effects. Saved or old data is not described as a live observation.
 - A transport-independent service layer with sender-and-key-bound instances, a durable request ledger, request identity checks, public-user quotas, and fail-closed administrator permissions.
@@ -18,13 +18,14 @@ A new bilingual workspace for Delta Chat: thoughtful local utilities, an ebook d
 
 - Explicitly confirmed Project Gutenberg delivery into an encrypted one-to-one chat. Each request rechecks source metadata and US public-domain status, validates the file type, and uses a durable per-identity delivery receipt. No arbitrary download URL is accepted. Files are limited to 24 MiB and subject to separate public-user and service-wide delivery quotas. Submission to Delta Chat is not a delivery/read receipt from the recipient.
 - A non-AI public web reader with explicit link following, local pagination, fetched-copy provenance and user-controlled text export. Its separate HTTPS transport validates every DNS answer and redirect, pins the checked public address and preserves TLS hostname verification, including through the optional local SOCKS route. No page scripts, images, cookies or login credentials are loaded. See [reader boundaries](docs/WEB_READER.md).
+- A metadata-only YouTube preview through the public oEmbed endpoint, accepting video-specific watch/Shorts/live/embed links. Titles and channel names are returned without a player, thumbnails, cookies or a model. Actual video download, duration, quality selection and transcripts are not implemented. See [media boundaries](docs/MEDIA.md).
 - Optional read-only assistant tools, capped at two per message: arithmetic, unit conversion, clocks, book discovery, place lookup, and weather. No shell, file access, messages, downloads, or permission changes are exposed to models. Verified results appear in an expandable activity trace.
 - A strict local-only mode that excludes external data tools and never silently switches to an online provider.
 - Optional pinned CPU inference using llama.cpp and Qwen2.5-0.5B-Instruct Q4_K_M. Assets are downloaded only on explicit preparation and checked against fixed SHA-256 digests. This small local model has limited reasoning and language quality; it is not equivalent to a large online model.
 
 ## Optional source routing
 
-The manual public-source check can opt into a verified local Cloudflare WARP proxy. Only allowlisted metadata/weather/ebook clients and the DNS-pinned public reader use `MICHIFLIN_SOURCE_PROXY`; bot mail, model APIs and backups are unchanged. Proxy failures do not silently fall back to direct requests. This does not implement YouTube downloads or guarantee platform access. See [migration and routing boundaries](docs/MIGRATION.md).
+The manual public-source check can opt into a verified local Cloudflare WARP proxy. Only allowlisted metadata/weather/ebook clients and the DNS-pinned reader/YouTube-metadata transport use `MICHIFLIN_SOURCE_PROXY`; bot mail, model APIs and backups are unchanged. Proxy failures do not silently fall back to direct requests. This does not implement YouTube downloads or guarantee platform access. See [migration and routing boundaries](docs/MIGRATION.md).
 
 ## Local inference
 
