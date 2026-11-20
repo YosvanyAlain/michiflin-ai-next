@@ -125,6 +125,32 @@ class Ledger:
             if changed.rowcount != 1:
                 raise AppError("request_checkpoint_failed")
 
+    def complete_note(self, instance: int, identifier: str, owner: str, operation: str, args: dict) -> dict:
+        digest = hashlib.sha256(json.dumps([operation, args], sort_keys=True, ensure_ascii=True,
+                                           separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+        with self.transaction() as db:
+            request = db.execute("SELECT * FROM requests WHERE instance=? AND id=?", (instance, identifier)).fetchone()
+            if (not request or request["owner"] != owner or request["digest"] != digest
+                    or request["state"] != "running" or operation not in {"notes.add", "notes.delete"}):
+                raise AppError("request_checkpoint_failed")
+            if operation == "notes.add":
+                text = args.get("text")
+                if not isinstance(text, str) or not 1 <= len(text.strip()) <= 6000:
+                    raise AppError("invalid_note")
+                if db.execute("SELECT COUNT(*) FROM notes WHERE owner=?", (owner,)).fetchone()[0] >= 200:
+                    raise AppError("notes_limit")
+                row = db.execute("INSERT INTO notes(owner,text,created) VALUES(?,?,?)", (owner, text.strip(), time.time()))
+                data = {"id": int(row.lastrowid)}
+            else:
+                note = args.get("id")
+                if type(note) is not int or note < 1:
+                    raise AppError("invalid_note")
+                data = {"deleted": db.execute("DELETE FROM notes WHERE id=? AND owner=?", (note, owner)).rowcount == 1}
+            response = {"id": identifier, "ok": True, "data": data}
+            db.execute("UPDATE requests SET state='done',response=?,updated=? WHERE instance=? AND id=?",
+                       (json.dumps(response, allow_nan=False), time.time(), instance, identifier))
+        return response
+
     def notes(self, owner: str) -> list[dict]:
         with self.connection() as db:
             return [dict(row) for row in db.execute("SELECT id,text,created FROM notes WHERE owner=? ORDER BY id DESC LIMIT 200", (owner,))]

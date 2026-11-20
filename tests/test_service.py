@@ -169,3 +169,51 @@ def test_service_wide_budget_cannot_be_bypassed_by_rotating_sender_keys(service,
     limited.register_instance(another, 43)
     result = limited.handle(another, 43, request(limited, identifier="synthetic-other-1234"))
     assert result["error"] == "service_daily_limit"
+
+
+def test_note_mutation_and_cached_response_commit_together(service, member, monkeypatch):
+    monkeypatch.setattr(service.ledger, "settle", lambda *_: pytest.fail("Non-atomic checkpoint used"))
+    value = request(service, "notes.add", {"text": "Atomic private note"})
+    first = service.handle(member, 42, value)
+    assert first["ok"]
+    restarted = Service(service.settings)
+    restarted.ledger.recover_interrupted()
+    value["session"] = restarted.session
+    assert restarted.handle(member, 42, value) == first
+    assert len(restarted.ledger.notes(member.storage_key)) == 1
+    deletion = request(restarted, "notes.delete", {"id": first["data"]["id"]}, identifier="atomic-delete-0001")
+    removed = restarted.handle(member, 42, deletion)
+    assert removed["data"]["deleted"] is True
+    assert restarted.handle(member, 42, deletion) == removed
+    assert not restarted.ledger.notes(member.storage_key)
+
+
+@pytest.mark.parametrize("operation", ["notes.add", "notes.delete"])
+def test_checkpoint_failure_rolls_back_note_mutation(service, member, operation):
+    import sqlite3
+
+    note = service.ledger.add_note(member.storage_key, "Retain on failed delete")
+    args = {"text": "Do not partially commit"} if operation == "notes.add" else {"id": note}
+    identifier = "atomic-failure-0001"
+    service.ledger.reserve(42, identifier, member.storage_key, operation, args, 40, 3)
+    with service.ledger.connection() as db:
+        db.execute("CREATE TRIGGER synthetic_checkpoint_failure BEFORE UPDATE OF response ON requests "
+                   "BEGIN SELECT RAISE(ABORT, 'synthetic checkpoint interruption'); END")
+    with pytest.raises(sqlite3.IntegrityError):
+        service.ledger.complete_note(42, identifier, member.storage_key, operation, args)
+    assert [row["id"] for row in service.ledger.notes(member.storage_key)] == [note]
+    with service.ledger.connection() as db:
+        assert db.execute("SELECT state FROM requests WHERE id=?", (identifier,)).fetchone()[0] == "running"
+        db.execute("DROP TRIGGER synthetic_checkpoint_failure")
+    response = service.ledger.complete_note(42, identifier, member.storage_key, operation, args)
+    assert response["ok"]
+
+
+def test_atomic_note_cannot_mutate_a_different_reserved_request(service, member):
+    from michiflin.errors import AppError
+
+    args = {"text": "Original note"}
+    service.ledger.reserve(42, "atomic-bound-0001", member.storage_key, "notes.add", args, 40, 3)
+    with pytest.raises(AppError, match="request_checkpoint_failed"):
+        service.ledger.complete_note(42, "atomic-bound-0001", member.storage_key, "notes.add", {"text": "Changed note"})
+    assert not service.ledger.notes(member.storage_key)

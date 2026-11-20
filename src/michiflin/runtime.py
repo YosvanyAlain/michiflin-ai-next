@@ -4,6 +4,7 @@ import atexit
 import fcntl
 import logging
 import os
+import signal
 from pathlib import Path
 
 from .adapter import DeltaAdapter
@@ -12,8 +13,13 @@ from .package import build
 from .service import Service
 
 
+def _terminate(_signum, _frame) -> None:
+    raise KeyboardInterrupt
+
+
 def main() -> None:
     os.umask(0o077)
+    signal.signal(signal.SIGTERM, _terminate)
     from deltabot_cli import BotCli
     from deltachat2 import events
     from deltachat2.types import EventTypeWebxdcStatusUpdate

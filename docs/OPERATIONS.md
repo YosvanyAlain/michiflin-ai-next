@@ -48,3 +48,22 @@ PYTHONPATH=src python tools/live_roundtrip.py --accept-create-test-accounts --di
 ```
 
 Use `--resume-test-accounts` only with the marked test directory to reuse those two accounts rather than creating more. Success verifies encrypted miniapp transport, a normal public-member handshake, the arithmetic request/response, and durable replay protection for note creation. Safe progress markers are printed; addresses, invitations and mailbox configuration are not printed.
+
+
+## Bounded model execution and atomic notes
+
+Incoming assistant requests run in a separate short-lived worker with a 95-second total deadline, including provider planning, read-only tools and final synthesis. Cancellation kills and reaps that worker; provider outcomes interrupted by the deadline are not automatically retried. The worker receives only its selected provider configuration, not administrator pins, backup tokens or other providers. Invalid provider schemas and nonstandard HTTPS endpoints are not advertised. Local endpoints must remain loopback HTTP chat-completion services.
+
+Note additions and deletions commit their mutation and replayable response in one SQLite transaction. A failed checkpoint rolls back the mutation. After a successful commit, replay across runtime restarts returns the original result without repeating the edit.
+
+## Private session supervisor
+
+`python -m michiflin.deployment --validate-only --directory /private/session` exercises the actual encrypted seed or latest completed checkpoint, creates a fresh snapshot, uploads it to a **private writable** release repository, downloads it again, and independently restores it. This mode never starts mail IO. Its validation markers do not advance production state.
+
+All deployment settings come from private environment configuration: `MICHIFLIN_DEPLOY_CONFIG`, `MICHIFLIN_BACKUP_PASSPHRASE`, `MICHIFLIN_BACKUP_REPOSITORY`, `MICHIFLIN_BACKUP_TOKEN`, `MICHIFLIN_SEED_ASSET_ID`, `MICHIFLIN_SEED_SHA256`, and the exact `MICHIFLIN_DEPLOY_REVISION`. Runtime configuration contains `providers`, pinned `admin_keys`, and a matching `backup_passphrase`. No configuration value belongs in a public workflow or artifact.
+
+Production additionally requires `MICHIFLIN_LAUNCH_REVISION` to equal the exact reviewed source revision. The private hosting workflow must share the legacy runtime's concurrency group, leave the legacy workflow disabled, and default to validation only. Never enable its schedule or arm a launch until every final launch gate above is satisfied.
+
+A live session publishes an immutable running marker **before** mail IO starts. Normal bounded shutdown first stops and waits for the runtime, then authenticates and independently verifies the uploaded checkpoint before publishing its completed marker. The next session selects only the latest session's completed checkpoint. If its completed marker is absent, automatic restart stops instead of silently restoring stale state. A failing live session retains its private local state, and any completed encrypted rescue snapshot remains under `recovery/`; the private hosting workflow must preserve only those encrypted rescue files as a restricted artifact on failure. An interrupted runner can still lose uncheckpointed state, so this design fails closed rather than promising lossless recovery from arbitrary infrastructure termination.
+
+Snapshot history and original seeds are retained; this supervisor never deletes legacy recovery assets or guesses a backup to roll back to. Manual recovery of a failed session requires inspection of the retained encrypted rescue checkpoint. A native-client UI interaction, upstream book download and pending administrator pairing remain separate gates, not consequences of a successful supervisor validation.

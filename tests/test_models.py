@@ -97,3 +97,115 @@ def test_provider_opaque_tool_signature_roundtrips_but_never_enters_user_output(
     messages = model.post.call_args.args[2]["messages"]
     assert messages[-2]["tool_calls"][0]["extra_content"] == {"google": {"thought_signature": "opaque-provider-metadata"}}
     assert "opaque-provider-metadata" not in str(result) and "discard" not in str(messages)
+
+
+@pytest.mark.parametrize("url", [
+    "https://[broken/v1/chat/completions", "https://provider.example.invalid:bad/v1/chat/completions",
+    "https://provider.example.invalid:8443/v1/chat/completions", "https://user:password@provider.example.invalid/v1/chat/completions",
+    "https://provider.example.invalid/v1/chat/completions?key=secret", "http://provider.example.invalid/v1/chat/completions",
+    "https://provider.example.invalid/unrelated", "https://provider.example.invalid/v1/chat/completions#fragment",
+])
+def test_invalid_provider_endpoints_are_not_advertised_or_called(url):
+    provider = {**gateway().settings.online_providers[0], "url": url}
+    model = ModelGateway(Settings(online_providers=(provider,)))
+    assert model.catalogue() == []
+    with pytest.raises(AppError, match="model_configuration_invalid"):
+        model.endpoint("synthetic", local_only=False)
+
+
+@pytest.mark.parametrize("field,value", [("key", {}), ("model", None), ("name", []), ("name", ""),
+                                        ("key", "bad\nheader"), ("id", ["invalid"]), ("id", "local")])
+def test_malformed_provider_schema_is_not_advertised(field, value):
+    provider = {**gateway().settings.online_providers[0], field: value}
+    assert ModelGateway(Settings(online_providers=(provider,))).catalogue() == []
+
+
+def test_bounded_worker_completes_a_real_local_tool_roundtrip():
+    import http.server
+    import threading
+
+    payloads = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def do_POST(self):
+            payloads.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            result = choice(calls=[call()]) if len(payloads) == 1 else choice("391")
+            body = json.dumps({"choices": [result]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        model = ModelGateway(Settings(local_model_url=f"http://127.0.0.1:{server.server_port}/v1/chat/completions"))
+        result = model.complete_bounded("17 * 23", "local", [], use_tools=True)
+        assert result["text"] == "391" and result["local"] is True
+        assert result["steps"][0]["data"]["value"] == 391
+        assert len(payloads) == 2 and payloads[-1]["tool_choice"] == "none"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(2)
+
+
+def test_bounded_worker_is_killed_even_when_headers_never_arrive():
+    import http.server
+    import threading
+    import time
+
+    entered, release = threading.Event(), threading.Event()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def do_POST(self):
+            entered.set()
+            release.wait(5)
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    model = ModelGateway(Settings(local_model_url=f"http://127.0.0.1:{server.server_port}/v1/chat/completions"))
+    model.operation_timeout = 1
+    started = time.monotonic()
+    try:
+        with pytest.raises(AppError, match="model_outcome_unconfirmed") as outcome:
+            model.complete_bounded("test", "local", [])
+        assert not outcome.value.retryable and entered.is_set()
+        assert time.monotonic() - started < 3
+    finally:
+        release.set()
+        server.shutdown()
+        server.server_close()
+        thread.join(2)
+
+
+def test_worker_receives_only_selected_provider_and_no_admin_configuration(monkeypatch):
+    import subprocess
+    from dataclasses import replace
+
+    model = gateway()
+    model.settings = replace(model.settings, admin_keys={"private@example.invalid": "A" * 40},
+                             local_model_key="unrelated-local-secret", online_providers=(
+                                 *model.settings.online_providers,
+                                 {**model.settings.online_providers[0], "id": "other", "key": "unrelated-provider-secret"}))
+    worker = Mock()
+    worker.returncode = 0
+    worker.communicate.return_value = (json.dumps({"ok": True, "data": {"text": "OK"}}).encode(), b"")
+    process = Mock()
+    process.__enter__ = Mock(return_value=worker)
+    process.__exit__ = Mock(return_value=False)
+    popen = Mock(return_value=process)
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setenv("GITHUB_TOKEN", "unrelated-github-secret")
+    model.complete_bounded("test", "synthetic", [])
+    encoded = worker.communicate.call_args.args[0]
+    assert b"unrelated" not in encoded and b"private@example.invalid" not in encoded
+    assert "GITHUB_TOKEN" not in popen.call_args.kwargs["env"]

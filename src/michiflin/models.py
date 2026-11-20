@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
+import sys
 import time
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
@@ -25,34 +29,98 @@ class ModelGateway:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
+    operation_timeout = 95
+
     def catalogue(self) -> list[dict]:
         result = []
-        if self.settings.local_model_url:
-            result.append({"id": "local", "name": "Local model", "local": True})
-        for provider in self.settings.online_providers:
-            if all(provider.get(key) for key in ("id", "name", "url", "model", "key")):
-                result.append({"id": provider["id"], "name": provider["name"], "local": False})
+        candidates = ["local"] if self.settings.local_model_url else []
+        candidates += [item.get("id") for item in self.settings.online_providers if isinstance(item, dict)]
+        for model in candidates:
+            try:
+                _url, _key, _model, name, local = self.endpoint(model, local_only=False)
+            except AppError:
+                continue
+            if not any(item["id"] == model for item in result):
+                result.append({"id": model, "name": name, "local": local})
         return result
 
     def endpoint(self, model: str, *, local_only: bool) -> tuple[str, str, str, str, bool]:
+        if not isinstance(model, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", model):
+            raise AppError("model_unavailable")
         local = model == "local" or local_only
         if local:
-            endpoint = self.settings.local_model_url
+            endpoint, token = self.settings.local_model_url, self.settings.local_model_key
+            model_id, name = "local", "Local model"
             if not endpoint:
                 raise AppError("local_model_unavailable")
+        else:
+            provider = next((item for item in self.settings.online_providers
+                             if isinstance(item, dict) and item.get("id") == model), None)
+            if not provider:
+                raise AppError("model_unavailable")
+            endpoint, token, model_id, name = (provider.get(key) for key in ("url", "key", "model", "name"))
+        code = "local_model_configuration_invalid" if local else "model_configuration_invalid"
+        if (not all(isinstance(value, str) for value in (endpoint, token, model_id, name))
+                or not 1 <= len(name.strip()) <= 120 or not 1 <= len(model_id) <= 200
+                or len(token) > 4096 or (not local and not token)
+                or any(ord(char) < 32 or ord(char) == 127 for value in (endpoint, token, model_id, name) for char in value)):
+            raise AppError(code)
+        try:
             parsed = urlsplit(endpoint)
-            if (parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
-                    or parsed.username or parsed.password or parsed.fragment):
-                raise AppError("local_model_configuration_invalid")
-            return endpoint, self.settings.local_model_key, "local", "Local model", True
-        provider = next((item for item in self.settings.online_providers if item.get("id") == model), None)
-        if not provider:
-            raise AppError("model_unavailable")
-        endpoint, token, model_id = (str(provider.get(key, "")) for key in ("url", "key", "model"))
-        parsed = urlsplit(endpoint)
-        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.fragment or not token:
-            raise AppError("model_configuration_invalid")
-        return endpoint, token, model_id, str(provider.get("name", model)), False
+            port = parsed.port
+        except ValueError:
+            raise AppError(code) from None
+        if (parsed.username or parsed.password or parsed.fragment or parsed.query or not parsed.hostname
+                or not parsed.path.endswith("/chat/completions") or len(endpoint) > 2048
+                or (local and (parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}))
+                or (not local and (parsed.scheme != "https" or port not in (None, 443)))):
+            raise AppError(code)
+        return endpoint, token, model_id, name, local
+
+    def complete_bounded(self, text: object, model: object, history: object, *, local_only: bool = False,
+                         use_tools: bool = False, locale: str = "en") -> dict:
+        if not isinstance(text, str) or not 1 <= len(text.strip()) <= 6000 or not isinstance(history, list):
+            raise AppError("invalid_prompt")
+        self.endpoint(model, local_only=local_only)
+        selected = [item for item in self.settings.online_providers if item.get("id") == model] if not local_only and model != "local" else []
+        settings = {"online_providers": selected,
+                    "local_model_url": self.settings.local_model_url if local_only or model == "local" else "",
+                    "local_model_key": self.settings.local_model_key if local_only or model == "local" else "",
+                    "contact": self.settings.contact}
+        try:
+            encoded = json.dumps({"settings": settings, "text": text, "model": model, "history": history,
+                                  "local_only": local_only, "use_tools": use_tools, "locale": locale},
+                                 allow_nan=False).encode()
+        except (ValueError, TypeError):
+            raise AppError("invalid_prompt") from None
+        if len(encoded) > 100000:
+            raise AppError("invalid_prompt")
+        environment = {key: os.environ[key] for key in ("PATH", "LANG", "LC_ALL", "SYSTEMROOT") if key in os.environ}
+        environment["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+        # The child receives only its selected provider and read-only tool configuration over a private pipe.
+        with subprocess.Popen([sys.executable, "-m", "michiflin.model_worker"], stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=environment) as worker:
+            try:
+                output, _ = worker.communicate(encoded, timeout=self.operation_timeout)
+            except subprocess.TimeoutExpired:
+                worker.kill()
+                worker.communicate()
+                raise AppError("model_outcome_unconfirmed", retryable=False) from None
+            except BaseException:
+                worker.kill()
+                worker.communicate()
+                raise
+        try:
+            if worker.returncode or len(output) > 1_000_000:
+                raise ValueError
+            response = json.loads(output)
+            if response["ok"] is True and isinstance(response["data"], dict):
+                return response["data"]
+            if response["ok"] is False and isinstance(response["error"], str):
+                raise AppError(response["error"], retryable=response.get("retryable") is True)
+        except (ValueError, KeyError, TypeError):
+            pass
+        raise AppError("model_outcome_unconfirmed", retryable=False)
 
     def post(self, endpoint: str, token: str, payload: dict) -> dict:
         try:

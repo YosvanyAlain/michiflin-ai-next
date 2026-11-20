@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from . import __version__, agent, downloads, library, utilities, weather
+from . import __version__, downloads, library, utilities, weather
 from .config import Settings
 from .errors import AppError
 from .identity import Principal
@@ -44,10 +44,9 @@ class Service:
             "notes.list": Operation(lambda principal, _a, _l: {"notes": self.ledger.notes(principal.storage_key)}),
             "notes.add": Operation(lambda principal, args, _l: {"id": self.ledger.add_note(principal.storage_key, args.get("text", ""))}),
             "notes.delete": Operation(lambda principal, args, _l: {"deleted": self.ledger.delete_note(principal.storage_key, args.get("id"))}),
-            "assistant.ask": Operation(lambda _p, args, locale: self.models.complete(
-                args.get("text"), args.get("model", "local"), args.get("history", []), local_only=args.get("local_only") is True,
-                toolset=agent.tools(self.client, local_only=args.get("local_only") is True or args.get("model") == "local", locale=locale)
-                if args.get("use_tools") is True else None)),
+            "assistant.ask": Operation(lambda _p, args, locale: self.models.complete_bounded(
+                args.get("text"), args.get("model", "local"), args.get("history", []),
+                local_only=args.get("local_only") is True, use_tools=args.get("use_tools") is True, locale=locale)),
             "admin.health": Operation(lambda _p, _a, _l: {"version": __version__, "uptime": round(time.monotonic() - self.started), "public_access": self.settings.public_access}, admin=True),
         }
 
@@ -95,6 +94,8 @@ class Service:
             if cached:
                 return cached
             try:
+                if op in {"notes.add", "notes.delete"}:
+                    return self.ledger.complete_note(instance, identifier, principal.storage_key, op, args)
                 result = operation.run(principal, args, locale, instance) if operation.instance else operation.run(principal, args, locale)
                 response = {"id": identifier, "ok": True, "data": result}
             except AppError as error:
