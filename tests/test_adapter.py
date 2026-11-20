@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -166,3 +167,58 @@ def test_oversized_update_stream_is_revoked_instead_of_retried_forever(connected
     assert not service.ledger.has_instance(42)
     adapter.status_update(42)
     assert not rpc.sent
+
+
+def attachment(tmp_path, **changes):
+    source = tmp_path / 'native-attachment.bin'
+    source.write_bytes(b'Synthetic private chat attachment')
+    value = dict(id=91, is_info=False, is_forwarded=False, from_id=10, chat_id=20, show_padlock=True,
+                 text='/save', file=str(source), file_name='saved.txt', file_bytes=source.stat().st_size,
+                 download_state='Done')
+    value.update(changes)
+    return SimpleNamespace(**value)
+
+
+def test_explicit_chat_attachment_save_is_durable_and_does_not_send_a_file_or_bind_an_instance(connected, tmp_path):
+    adapter, rpc, service = connected
+    message = attachment(tmp_path)
+    adapter.new_message(message)
+    adapter.new_message(message)
+    principal = adapter.principal(20, encrypted=True)
+    files = service.artifacts.list(principal.storage_key, 20, 42)['files']
+    assert len(files) == 1 and files[0]['state'] == 'ready'
+    with service.artifacts.open(principal.storage_key, 20, 42, files[0]['id']) as stream:
+        assert stream.read() == b'Synthetic private chat attachment'
+    assert not rpc.issued and not rpc.sent
+    assert not service.ledger.has_instance(message.id)
+    assert Path(message.file).read_bytes() == b'Synthetic private chat attachment'
+
+
+@pytest.mark.parametrize('changes', [{'show_padlock': False}, {'from_id': 99}, {'text': '/save /etc/passwd'},
+                                     {'file': None}, {'download_state': 'Available'}, {'file_bytes': 17 * 1024**2}])
+def test_chat_save_rejects_untrusted_sender_paths_plaintext_and_undownloaded_files(connected, tmp_path, changes):
+    adapter, _rpc, service = connected
+    with pytest.raises(AppError):
+        adapter.new_message(attachment(tmp_path, **changes))
+    assert not list(service.artifacts.directory.iterdir())
+
+
+@pytest.mark.parametrize('changes', [{'is_forwarded': True}, {'is_info': True}, {'from_id': 1}])
+def test_chat_attachment_save_ignores_forwarded_info_and_self_messages(connected, tmp_path, changes):
+    adapter, _rpc, service = connected
+    adapter.new_message(attachment(tmp_path, **changes))
+    assert not list(service.artifacts.directory.iterdir())
+
+
+def test_chat_save_requires_an_existing_nonrevoked_bot_issued_instance(connected, tmp_path):
+    adapter, _rpc, service = connected
+    service.ledger.revoke(42)
+    with pytest.raises(AppError, match='artifact_open_app_first'):
+        adapter.new_message(attachment(tmp_path))
+    assert not list(service.artifacts.directory.iterdir())
+
+
+def test_plain_attachment_without_explicit_save_never_imports_itself(connected, tmp_path):
+    adapter, _rpc, service = connected
+    adapter.new_message(attachment(tmp_path, text='A private photo, not a save command'))
+    assert not list(service.artifacts.directory.iterdir())

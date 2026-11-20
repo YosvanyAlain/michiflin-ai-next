@@ -244,3 +244,69 @@ def test_job_controls_retain_existing_encryption_and_session_gates(service, memb
         value = request(service, op)
         value["session"] = "stale"
         assert service.handle(member, 42, value)["error"] == "session_changed"
+
+
+def test_file_protocol_put_read_delete_replay_and_opaque_binding(service, member):
+    import base64
+
+    body = b'Synthetic private inline copy\x00'
+    args = {'name': 'original.txt', 'data': base64.b64encode(body).decode()}
+    value = request(service, 'files.put', args, 'synthetic-file-put-0001')
+    saved = service.handle(member, 42, value)
+    assert saved['ok'] and saved['data']['state'] == 'ready'
+    assert service.handle(member, 42, value) == saved
+    artifact = saved['data']['id']
+    read = service.handle(member, 42, request(service, 'files.read', {'id': artifact}, 'synthetic-file-read-0001'))
+    assert read['ok'] and base64.b64decode(read['data']['data']) == body
+    service.register_instance(member, 43)
+    denied = service.handle(member, 43, request(service, 'files.read', {'id': artifact}, 'synthetic-file-read-0002'))
+    assert denied['error'] == 'artifact_not_found'
+    deleted = service.handle(member, 42, request(service, 'files.delete', {'id': artifact}, 'synthetic-file-del-0001'))
+    assert deleted['ok'] and deleted['data']['deleted']
+    assert service.handle(member, 42, value) == saved
+    assert not list(service.artifacts.directory.iterdir())
+    for private in ('owner', 'filename', 'path', 'request_id'):
+        assert private not in saved['data']
+
+
+@pytest.mark.parametrize('args', [{'name': 'file', 'data': 'not base64!'}, {'name': '../escape', 'data': ''},
+                                {'name': 'file', 'data': 'x' * 16385}, {'name': 'file', 'source': '/etc/passwd'},
+                                {'name': 'file', 'data': '', 'request_id': 'untrusted-replacement'}])
+def test_file_protocol_rejects_paths_bad_data_and_request_id_override(service, member, args):
+    result = service.handle(member, 42, request(service, 'files.put', args))
+    assert not result['ok']
+    assert not list(service.artifacts.directory.iterdir())
+
+
+def test_file_reads_and_imports_keep_encryption_session_and_daily_quota_gates(service, member):
+    import base64
+
+    args = {'name': 'file', 'data': base64.b64encode(b'content').decode()}
+    for op in ('files.list', 'files.put', 'files.status', 'files.read', 'files.delete'):
+        assert not service.handle(replace(member, encrypted=False), 42, request(service, op, args))['ok']
+        value = request(service, op, args)
+        value['session'] = 'stale'
+        assert service.handle(member, 42, value)['error'] == 'session_changed'
+    limited = Service(replace(service.settings, daily_requests=1))
+    assert limited.handle(member, 42, request(limited, 'files.put', args))['ok']
+    assert limited.handle(member, 42, request(limited, 'files.list', {}, 'synthetic-file-next-0001'))['error'] == 'daily_limit'
+    assert 'native.file.save' not in service.operations
+    assert 'files.reconcile' not in service.operations
+
+
+def test_inline_read_bytes_are_not_retained_in_request_cache_and_cannot_bypass_deletion(service, member):
+    import base64
+    import json
+
+    body = b'Private file content that must not persist in the response cache.'
+    artifact = service.artifacts.put(member.storage_key, member.chat_id, 42, 'synthetic-file-source-0001', 'private.txt', body)
+    value = request(service, 'files.read', {'id': artifact['id']}, 'synthetic-file-private-read')
+    first = service.handle(member, 42, value)
+    assert first['ok'] and base64.b64decode(first['data']['data']) == body
+    with service.ledger.connection() as db:
+        response = db.execute('SELECT response FROM requests WHERE instance=42 AND id=?', (value['id'],)).fetchone()[0]
+        assert 'data' not in json.loads(response)['data']
+        assert base64.b64encode(body).decode() not in response
+    assert service.handle(member, 42, value) == first
+    service.artifacts.delete(member.storage_key, member.chat_id, 42, artifact['id'])
+    assert service.handle(member, 42, value)['error'] == 'artifact_not_ready'

@@ -27,7 +27,7 @@ window.Michiflin = (() => {
     close:'<path d="m6 6 12 12M6 18 18 6"/>',
     shield:'<path d="m12 2 9 4v6c0 5-9 10-9 10S3 17 3 12V6Zm-5 9 3 3 6-6"/>',
   };
-  Object.assign(icons,{finance:icons.calculator,date_math:icons.world_clock,encoding:icons.converter,file_inspector:icons.shield,image_lab:icons.utilities,csv_lab:icons.json,zip_inspector:icons.shield,audio_lab:icons.activity});
+  Object.assign(icons,{finance:icons.calculator,date_math:icons.world_clock,encoding:icons.converter,file_inspector:icons.shield,server_files:icons.copy,image_lab:icons.utilities,csv_lab:icons.json,zip_inspector:icons.shield,audio_lab:icons.activity});
   const el = (tag, attrs = {}, ...children) => {
     const node = document.createElement(tag);
     for (const [key, value] of Object.entries(attrs)) {

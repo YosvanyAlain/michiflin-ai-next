@@ -4,6 +4,8 @@
 
 Migration phase 2 is developing. `michiflin.parts` implements bounded local raw splitting, gap reporting and verified reconstruction. It is not yet a public URL downloader, queued transfer handler, mail sender, user interface, retention service or an end-to-end encrypted delivery claim. Existing lawful book delivery continues through its existing narrower path. No new executable card or member operation exposes filesystem paths or raw-part functions.
 
+A separate limited server-copy tool now supports opaque identity-bound files, small inline upload/export, native attachment ingestion and authenticated backup (`ARTIFACTS.md`). It does not yet invoke these raw-part functions or provide multipart delivery. Its UI never accepts a server filesystem path.
+
 Callers must resolve and authorize source/destination paths inside the current identity's workspace, reserve disk for both staged and reconstructed data, and run the operation within an admitted bounded worker. The library does not accept chat addresses, invitations, arbitrary remote URLs or secrets. Its Linux no-clobber directory publication requires `renameat2(RENAME_NOREPLACE)` and fails closed when that facility/filesystem is unavailable.
 
 ## Raw format
@@ -38,4 +40,4 @@ An input `.xdc` is copied as raw bytes exactly like any other file and is never 
 
 `tests/test_parts_native.py` additionally builds the real bilingual miniapp, splits/reconstructs it, compares the trusted whole-file checksum and asks the native Delta Chat core to recognize the reconstructed `.xdc`. The native message is encrypted/queued locally between synthetic `.invalid` accounts and no mail IO is started. This is a real native format check, not a remote receive/delivery result or a phone UI test.
 
-Still required before phase-2 completion: reviewed disk-backed job handlers and safe URL downloads, identity-bound artifact inventory, mailbox/Nauta settings and scheduling, cancellable bounded network workers, durable per-part receipts and explicit selected-part resend, retention/cleanup, queue/transfer UI, authenticated backup inclusion for artifacts, and a real encrypted send/receive/reconstruction/hash test including restart and uncertain-send failures. Passing local splitting tests is not encrypted transfer delivery evidence.
+Still required before phase-2 completion: reviewed disk-backed job handlers and safe URL downloads using the bounded artifact inventory, mailbox/Nauta settings and scheduling, cancellable bounded network workers, durable per-part receipts and explicit selected-part resend, retention/cleanup, a real queue/multipart-transfer UI, explicit authenticated inventory inclusion for new worker outputs, and a real encrypted send/receive/reconstruction/hash test including restart and uncertain-send failures. Passing local splitting tests is not encrypted transfer delivery evidence.

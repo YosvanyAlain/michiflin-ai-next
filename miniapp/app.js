@@ -13,6 +13,7 @@
     ["finance","mint",true],["date_math","peach",true],["encoding","",true],
     ["file_inspector","mint",true],["image_lab","peach",true],
     ["csv_lab","mint",true],["zip_inspector","",true],["audio_lab","peach",true],
+    ["server_files","mint",false],
   ];
   const pageHeading=(title,body)=>el("header",{class:"page-heading"},el("h1",{},tr(title)),el("p",{},tr(body)));
   const remoteButton=(key,action,style="primary",glyph="arrow")=>{const control=button(key,action,style,glyph);control.dataset.remote="true";control.disabled=!M.transport.ready;return control;};
@@ -23,7 +24,7 @@
   const status=()=>{
     const ready=M.transport.ready;
     const node=document.querySelector("#connection-status");node.dataset.connected=String(ready);node.textContent=tr(ready?"connected":"not_connected");
-    document.querySelectorAll("[data-remote]").forEach(control=>{control.disabled=!ready;});
+    document.querySelectorAll("[data-remote]").forEach(control=>{control.disabled=!ready||control.dataset.busy==="true"||!!control.dataset.requiredOperation&&!M.transport.service?.operations?.includes(control.dataset.requiredOperation);});
     document.querySelectorAll("[data-connection-hint]").forEach(control=>{control.hidden=ready;});
     const models=document.querySelector("#assistant-model");
     if(models){const current=models.value;fill(models,...(M.transport.service?.models||[]).map(model=>el("option",{value:model.id},model.name)));models.value=current||models.options[0]?.value||"";if(!models.options.length)models.append(el("option",{value:""},tr("no_models")));}
@@ -60,7 +61,7 @@
     content.append(el("div",{class:"home-lower"},panel,weatherPanel),connectionHint());
   };
   let utilityFilter="all",utilityQuery="";
-  const toolGroup=id=>["file_inspector","image_lab","csv_lab","zip_inspector","audio_lab"].includes(id)?"files":["text_lab","json","encoding"].includes(id)?"create":"daily";
+  const toolGroup=id=>["file_inspector","image_lab","csv_lab","zip_inspector","audio_lab","server_files"].includes(id)?"files":["text_lab","json","encoding"].includes(id)?"create":"daily";
   const toolCatalogue=()=>{
     content.append(pageHeading("utilities","tools_body"));
     const search=el("input",{type:"search",placeholder:tr("search"),"aria-label":tr("search"),value:utilityQuery});
@@ -75,7 +76,7 @@
   };
   const tool=()=>{
     if(!utilities.some(([id])=>id===route)){navigate("home");return;}
-    content.append(button("utilities",()=>navigate("utilities"),"text back-button","arrow"),pageHeading(route,route+"_desc"),["reader","youtube"].includes(route)?connectionHint():null,(route==="reader"?M.reader:route==="youtube"?M.media:["csv_lab","zip_inspector","audio_lab"].includes(route)?M.filetools:["finance","date_math","encoding","file_inspector","image_lab"].includes(route)?M.extras:M.offline).view(route));
+    content.append(button("utilities",()=>navigate("utilities"),"text back-button","arrow"),pageHeading(route,route+"_desc"),["reader","youtube","server_files"].includes(route)?connectionHint():null,(route==="server_files"?M.serverfiles:route==="reader"?M.reader:route==="youtube"?M.media:["csv_lab","zip_inspector","audio_lab"].includes(route)?M.filetools:["finance","date_math","encoding","file_inspector","image_lab"].includes(route)?M.extras:M.offline).view(route));
   };
   const library=()=>{
     content.append(pageHeading("library_title","library_body"));

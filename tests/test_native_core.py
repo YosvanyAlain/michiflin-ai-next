@@ -80,3 +80,36 @@ def test_native_core_identity_package_status_and_encrypted_restore(tmp_path):
         assert restored_adapter.principal(chat, encrypted=True).storage_key == principal.storage_key
         assert rpc.get_webxdc_info(restored, instance).name == "Michiflin AI"
         assert json.loads(rpc.get_webxdc_status_updates(restored, instance, 0)) == updates
+
+
+def test_native_blob_attachment_copy_with_simulated_incoming_event_never_starts_mail_io(tmp_path):
+    from dataclasses import replace
+
+    with core.IOTransport(accounts_dir=str(tmp_path / 'accounts')) as transport:
+        rpc = core.Rpc(transport)
+        bot, peer = rpc.add_account(), rpc.add_account()
+        configure_offline(rpc, bot, 'bot@example.invalid')
+        configure_offline(rpc, peer, 'peer@example.invalid')
+        contacts = rpc.import_vcard_contents(bot, rpc.make_vcard(peer, [1]))
+        chat = rpc.create_chat_by_contact_id(bot, contacts[0])
+        service = Service(Settings(state_dir=tmp_path / 'state'))
+        package = build(Path(__file__).resolve().parents[1] / 'miniapp', tmp_path / 'packages')
+        adapter = DeltaAdapter(rpc, bot, service, package)
+        principal = adapter.principal(chat, encrypted=True)
+        instance = rpc.send_msg(bot, chat, core.MessageData(file=str(package), text='Synthetic app'))
+        service.register_instance(principal, instance)
+        source = tmp_path / 'original.txt'
+        source.write_bytes(b'Synthetic native blob copy; original preserved.')
+        outgoing = rpc.send_msg(bot, chat, core.MessageData(file=str(source), text='/save'))
+        native = rpc.get_message(bot, outgoing)
+        assert native.show_padlock and native.file
+        # The native RPC supplies the actual downloaded-blob layout; only the incoming event is simulated.
+        incoming = replace(native, from_id=contacts[0])
+        adapter.new_message(incoming)
+        adapter.new_message(incoming)
+        files = service.artifacts.list(principal.storage_key, chat, instance)['files']
+        assert len(files) == 1
+        with service.artifacts.open(principal.storage_key, chat, instance, files[0]['id']) as copied:
+            assert copied.read() == source.read_bytes()
+        assert source.read_bytes() == b'Synthetic native blob copy; original preserved.'
+        assert not service.ledger.has_instance(outgoing)

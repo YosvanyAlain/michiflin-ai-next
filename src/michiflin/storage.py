@@ -175,6 +175,9 @@ class Ledger:
         with self.transaction() as db:
             db.execute("UPDATE requests SET state='uncertain',updated=? WHERE state='running'", (time.time(),))
             db.execute("UPDATE outbox SET state='uncertain' WHERE state='sending'")
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifacts'").fetchone():
+                db.execute("UPDATE artifacts SET state='uncertain',updated=?,error='artifact_outcome_uncertain' "
+                           "WHERE state IN ('importing','deleting') OR (state='ready' AND readers>0)", (time.time(),))
             if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='jobs'").fetchone():
                 db.execute("UPDATE jobs SET state='uncertain',updated=?,error='job_outcome_uncertain' "
                            "WHERE state IN ('running','pausing','cancelling')", (time.time(),))
@@ -209,7 +212,16 @@ class Ledger:
         with self.transaction() as db:
             db.execute("UPDATE instances SET revoked=1 WHERE id=?", (instance,))
 
+    @staticmethod
+    def check_snapshot_capacity(db) -> None:
+        count = db.execute("SELECT COUNT(*) FROM outbox WHERE state IN ('queued','sending','uncertain')").fetchone()[0]
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifacts'").fetchone():
+            count += db.execute("SELECT COUNT(*) FROM artifacts WHERE state NOT IN ('deleted','failed')").fetchone()[0]
+        if count >= 100:
+            raise AppError("snapshot_file_limit")
+
     def _check_delivery_capacity(self, db, owner: str) -> None:
+        self.check_snapshot_capacity(db)
         since = time.time() - 86400
         own = db.execute("SELECT COUNT(*) FROM outbox WHERE owner=? AND created>?", (owner, since)).fetchone()[0]
         total = db.execute("SELECT COUNT(*) FROM outbox WHERE created>?", (since,)).fetchone()[0]

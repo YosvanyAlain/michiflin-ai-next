@@ -71,13 +71,18 @@ class DeltaAdapter:
         if message.is_info or message.is_forwarded or message.from_id <= 9:
             return
         words = (message.text or "").split(maxsplit=1)
-        if not words or words[0].lower() not in {"/start", "/app", "/help", "/inicio", "/ayuda"}:
+        if not words or words[0].lower() not in {"/start", "/app", "/help", "/inicio", "/ayuda", "/save", "/guardar"}:
             return
         principal = self.principal(message.chat_id, encrypted=message.show_padlock)
         contact_ids = self.rpc.get_chat_contacts(self.account, message.chat_id)
         if message.from_id not in contact_ids:
             raise AppError("identity_unavailable")
         principal.require_access(self.service.settings)
+        if words[0].lower() in {"/save", "/guardar"}:
+            if len(words) != 1:
+                raise AppError("invalid_artifact_data")
+            self.save_attachment(principal, message)
+            return
         if not self.service.ledger.allow_delivery(principal.storage_key):
             return
         self.rpc.accept_chat(self.account, message.chat_id)
@@ -85,6 +90,24 @@ class DeltaAdapter:
             file=str(self.package), text="Michiflin AI · English / Español"))
         # Bind only instances issued here. Forwarded or uploaded copies cannot acquire an owner.
         self.service.register_instance(principal, instance)
+
+    def save_attachment(self, principal: Principal, message) -> None:
+        state = getattr(message, "download_state", None)
+        state = getattr(state, "value", state)
+        source, message_id = getattr(message, "file", None), getattr(message, "id", None)
+        if (state != "Done" or not isinstance(source, str) or type(message_id) is not int or message_id < 1
+                or not source or type(getattr(message, "file_bytes", None)) is not int
+                or not 0 <= message.file_bytes <= self.service.artifacts.limits.file_bytes):
+            raise AppError("artifact_attachment_unavailable")
+        with self.service.ledger.connection() as db:
+            row = db.execute("SELECT id FROM instances WHERE owner=? AND chat=? AND revoked=0 "
+                             "ORDER BY created DESC,id DESC LIMIT 1", (principal.storage_key, principal.chat_id)).fetchone()
+        if row is None:
+            raise AppError("artifact_open_app_first")
+        # The source is supplied by the native core, never parsed from message text or status-update args.
+        self.service.import_attachment(principal, row["id"], message_id,
+                                       getattr(message, "file_name", None) or "attachment.bin", Path(source))
+        # No automatic reply/file send: manual refresh exposes the durable result without resend ambiguity.
 
     def status_update(self, instance: int) -> None:
         if not self.service.ledger.has_instance(instance):

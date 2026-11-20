@@ -353,17 +353,17 @@ def test_compact_catalogue_filters_search_and_keeps_tools_accessible(tmp_path, e
             page.set_viewport_size({"width": width, "height": 844})
             page.evaluate("location.hash='utilities'")
             page.locator(".utility-toolbar").wait_for()
-            assert page.locator(".tool-card").count() == 18
+            assert page.locator(".tool-card").count() == 19
             assert page.locator(".tool-card p").count() == 0
             assert page.locator(".tool-card").first.bounding_box()["height"] <= 105
             page.locator('[data-group="files"]').click()
-            assert page.locator(".tool-card").count() == 5
+            assert page.locator(".tool-card").count() == 6
             assert page.locator('[data-group="files"]').get_attribute("aria-pressed") == "true"
             page.locator('.utility-search input').fill("CSV")
             assert page.locator(".tool-card").count() == 1
             page.locator('.utility-search input').fill("")
             page.locator('[data-group="all"]').click()
-            assert page.locator(".tool-card").count() == 18
+            assert page.locator(".tool-card").count() == 19
             assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1")
             page.evaluate("location.hash='home'")
             page.locator(".feature-hero").wait_for()

@@ -79,6 +79,14 @@ def test_native_snapshot_restores_account_ledger_and_pending_delivery_without_io
         cached.write_bytes(gzip.compress(CSV.encode()))
         fetched_at = int(time.time()) - 3600
         os.utime(cached, (fetched_at, fetched_at))
+        from michiflin.artifacts import ArtifactStore
+
+        store = ArtifactStore(ledger)
+        artifact = store.put("synthetic-owner", 20, 42, "synthetic-artifact-ready", "private-copy.txt", b"Private synthetic file")
+        missing = store.put("synthetic-owner", 20, 42, "synthetic-artifact-uncertain", "uncertain.txt", b"Uncertain synthetic file")
+        (store.directory / (missing["id"] + ".blob")).unlink()
+        with ledger.transaction() as db:
+            db.execute("UPDATE artifacts SET state='uncertain' WHERE id=?", (missing["id"],))
     encrypted = tmp_path / "next.snapshot"
     with core.IOTransport(accounts_dir=str(tmp_path / "original-accounts")) as transport:
         rpc = core.Rpc(transport)
@@ -109,6 +117,13 @@ def test_native_snapshot_restores_account_ledger_and_pending_delivery_without_io
     if include_catalog:
         from michiflin import gutenberg
 
+        restored_store = ArtifactStore(restored_ledger)
+        with restored_store.open("synthetic-owner", 20, 42, artifact["id"]) as stream:
+            assert stream.read() == b"Private synthetic file"
+        assert restored_store.directory.stat().st_mode & 0o777 == 0o700
+        assert restored_store.get("synthetic-owner", 20, 42, missing["id"])["state"] == "uncertain"
+        with pytest.raises(AppError, match="artifact_not_ready"), restored_store.open("synthetic-owner", 20, 42, missing["id"]):
+            pass
         restored_cache = destination / "state" / "catalog" / "catalog.csv.gz"
         assert restored_cache.read_bytes() == cached.read_bytes()
         assert int(restored_cache.stat().st_mtime) == fetched_at
@@ -191,6 +206,69 @@ def test_invalid_optional_catalogue_never_reaches_native_identity_import(tmp_pat
     encrypted = tmp_path / 'malformed.snapshot'
     seal(archive, encrypted, PASSPHRASE)
     native = Mock(side_effect=AssertionError('Invalid cache must fail before importing any native identity'))
+    monkeypatch.setattr(deltachat2, 'IOTransport', native)
+    with pytest.raises(ValueError):
+        restore(encrypted, tmp_path / 'restored', PASSPHRASE)
+    native.assert_not_called()
+    assert not (tmp_path / 'restored').exists()
+
+
+@pytest.mark.parametrize('case', ['missing', 'unlisted', 'wrong_hash', 'wrong_size', 'boolean_size',
+                                  'traversal', 'symlink', 'pending_import', 'extra_field'])
+def test_artifact_snapshot_failures_never_reach_native_identity_import(tmp_path, monkeypatch, case):
+    import io
+    import json
+    import tarfile
+    from unittest.mock import Mock
+
+    import deltachat2
+
+    from michiflin.artifacts import ArtifactStore
+
+    ledger = Ledger(tmp_path / 'state')
+    ledger.bind(42, 'owner', 20)
+    store = ArtifactStore(ledger)
+    artifact = store.put('owner', 20, 42, 'synthetic-artifact-0001', 'file.txt', b'content')
+    if case == 'pending_import':
+        with ledger.transaction() as db:
+            db.execute("UPDATE artifacts SET state='importing'")
+    workspace = tmp_path / 'workspace.sqlite3'
+    with ledger.connection() as db, sqlite3.connect(workspace) as target:
+        db.backup(target)
+    name, body = artifact['id'] + '.blob', b'content'
+    inventory = {name: {'bytes': len(body), 'sha256': hashlib.sha256(body).hexdigest()}}
+    if case == 'unlisted':
+        inventory = {}
+    elif case == 'wrong_hash':
+        inventory[name]['sha256'] = '0' * 64
+    elif case == 'wrong_size':
+        inventory[name]['bytes'] = len(body) + 1
+    elif case == 'boolean_size':
+        inventory[name]['bytes'] = True
+    elif case == 'extra_field':
+        inventory[name]['path'] = '/untrusted'
+    elif case == 'traversal':
+        inventory = {'../outside.blob': inventory[name]}
+    manifest = {'format': 1, 'deliveries': {}, 'artifacts': inventory, 'identity': 'synthetic',
+                'account_sha256': hashlib.sha256(b'account').hexdigest(),
+                'workspace_sha256': hashlib.sha256(workspace.read_bytes()).hexdigest()}
+    archive = tmp_path / 'bundle.tar'
+    with tarfile.open(archive, 'w') as bundle:
+        entries = {'account.tar': b'account', 'workspace.sqlite3': workspace.read_bytes(),
+                   'manifest.json': json.dumps(manifest).encode()}
+        if case != 'missing':
+            entries['artifacts/' + name] = body
+        for filename, data in entries.items():
+            item = tarfile.TarInfo(filename)
+            item.size = len(data)
+            if case == 'symlink' and filename.startswith('artifacts/'):
+                item.type, item.linkname, item.size = tarfile.SYMTYPE, '/private/secret', 0
+                bundle.addfile(item)
+            else:
+                bundle.addfile(item, io.BytesIO(data))
+    encrypted = tmp_path / 'snapshot'
+    seal(archive, encrypted, PASSPHRASE)
+    native = Mock(side_effect=AssertionError('Malformed artifact must fail before native identity import'))
     monkeypatch.setattr(deltachat2, 'IOTransport', native)
     with pytest.raises(ValueError):
         restore(encrypted, tmp_path / 'restored', PASSPHRASE)
