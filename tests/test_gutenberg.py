@@ -251,3 +251,59 @@ def test_symlinked_compressed_feed_is_not_read_or_replaced(tmp_path, monkeypatch
         client.sync()
     fetch.assert_not_called()
     assert private.read_bytes() == b'private synthetic data'
+
+
+def test_operator_local_feed_import_preserves_age_and_still_requires_fresh_rights(tmp_path, monkeypatch):
+    source = tmp_path / 'verified.csv.gz'
+    source.write_bytes(gzip.compress(CSV.encode()))
+    age = time.time() - 3600
+    os.utime(source, (age, age))
+    client = GutenbergClient(tmp_path / 'catalog')
+    fetch = Mock(side_effect=AssertionError('Local feed import must not fetch a bulk feed'))
+    monkeypatch.setattr(gutenberg, 'fetch', fetch)
+    client.import_feed(source)
+    client.sync()
+    assert client.feed.stat().st_mtime == age == client.database.stat().st_mtime
+    fetch.assert_not_called()
+    metadata = Mock(return_value=parse_metadata(rdf(rights='Copyrighted.'), 1342))
+    monkeypatch.setattr(client, 'metadata', metadata)
+    assert library.search(client, library.BookQuery(title='Pride', format='epub'))['books'] == []
+    metadata.assert_called_once_with(1342)
+
+
+@pytest.mark.parametrize('kind', ['symlink', 'oversized', 'future', 'corrupt'])
+def test_operator_import_refuses_unbounded_or_invalid_local_feeds(tmp_path, kind):
+    source = tmp_path / 'source.csv.gz'
+    if kind == 'symlink':
+        source.symlink_to(tmp_path / 'private')
+    else:
+        source.write_bytes(gzip.compress(CSV.encode()))
+        if kind == 'oversized':
+            with source.open('r+b') as stream:
+                stream.truncate(8 * 1024 * 1024 + 1)
+        elif kind == 'future':
+            stamp = time.time() + 86400
+            os.utime(source, (stamp, stamp))
+        elif kind == 'corrupt':
+            source.write_bytes(b'not gzip')
+    client = GutenbergClient(tmp_path / 'catalog')
+    with pytest.raises(AppError):
+        client.import_feed(source)
+    assert not client.database.exists() and not client.feed.exists()
+
+
+def test_cached_catalogue_diagnostic_discloses_origin_without_a_second_bulk_transfer(source, monkeypatch):
+    from michiflin import diagnostics
+
+    client, fetch, metadata = source
+    client.sync()
+    original = client.database.read_bytes()
+    monkeypatch.setattr(diagnostics.library, '_openlibrary', lambda *_: {'books': []})
+    monkeypatch.setattr(diagnostics.weather, 'locations', lambda *_: {'places': []})
+    monkeypatch.setattr(diagnostics.weather, 'forecast', lambda *_: {'data_kind': 'weather_model'})
+    result = diagnostics.check_sources(catalog_client=client)
+    assert result['gutenberg_catalog']['ok'] and result['gutenberg_catalog']['catalog_origin'] == 'provided_cache'
+    assert result['gutenberg_catalog']['items'] == 1
+    assert 'cached_rebuild_seconds' not in result['gutenberg_catalog']
+    assert client.database.read_bytes() == original
+    assert fetch.call_count == 1 and metadata.call_count == 1

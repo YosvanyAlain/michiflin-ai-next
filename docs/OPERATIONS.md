@@ -27,6 +27,12 @@ The passphrase file must have owner-only permissions, not be a symlink, and cont
 
 Queued deliveries can resume only after the restored owner, chat and instance bindings pass again. A delivery whose sending outcome was interrupted is uncertain and is never automatically sent again.
 
+## Public catalogue bootstrap
+
+For an initial cold host, an operator may explicitly provide `--catalog-feed /private/catalog.csv.gz` with `--prepare-catalog`. This accepts a local file only, not a request-supplied URL. Verify its source, SHA-256 digest and original fetch time before transfer. The importer rejects links, oversized or implausibly future-dated files, validates the complete bounded gzip/CSV payload, preserves its fetch time and rebuilds the index atomically. A compressed feed is discovery data, never public-domain or format evidence. Do not make old feeds fresh by resetting their timestamp. Subsequent authenticated checkpoints can carry this optional bounded feed across hosting restarts.
+
+Private recovery validation should use a separate manual-only workflow with a literal validation-only call and an empty launch-revision environment. That validator must not offer a run mode or schedule, and the actual runtime workflow stays disabled. Source failures must remain visible rather than being masked by a successful identity restore.
+
 ## Final launch gates
 
 - Green source, browser, native-core, package, and restore checks on the exact revision.

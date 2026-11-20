@@ -130,7 +130,7 @@ def test_failed_live_checkpoint_preserves_private_state_and_blocks_restart(tmp_p
     _execute_fixture(tmp_path, monkeypatch, validate_only=False, fail_checkpoint=True)
 
 
-def _execute_fixture(tmp_path, monkeypatch, *, validate_only, fail_checkpoint=False, runtime_exit=0, prepare_catalog=False):
+def _execute_fixture(tmp_path, monkeypatch, *, validate_only, fail_checkpoint=False, runtime_exit=0, prepare_catalog=False, catalog_feed=None):
     revision = "a" * 40
     config = {"providers": [{"id": "synthetic"}], "admin_keys": {"synthetic": "b" * 40},
               "backup_passphrase": "private-passphrase-" * 3}
@@ -152,7 +152,7 @@ def _execute_fixture(tmp_path, monkeypatch, *, validate_only, fail_checkpoint=Fa
     monkeypatch.setattr(deployment, "checkpoint", checkpoint)
     if fail_checkpoint:
         with pytest.raises(ValueError, match="synthetic backup failure"):
-            deployment.execute(validate_only=validate_only, duration=1, directory=tmp_path, source=tmp_path, prepare_catalog=prepare_catalog)
+            deployment.execute(validate_only=validate_only, duration=1, directory=tmp_path, source=tmp_path, prepare_catalog=prepare_catalog, catalog_feed=catalog_feed)
         assert list(tmp_path.glob("next-session-*/runtime"))
         assert store.upload.call_args.args[1].name.endswith(".running.json")
     elif runtime_exit:
@@ -160,12 +160,13 @@ def _execute_fixture(tmp_path, monkeypatch, *, validate_only, fail_checkpoint=Fa
             deployment.execute(validate_only=False, duration=1, directory=tmp_path, source=tmp_path)
         assert not list(tmp_path.glob("next-session-*"))
     else:
-        result = deployment.execute(validate_only=validate_only, duration=1, directory=tmp_path, source=tmp_path, prepare_catalog=prepare_catalog)
+        result = deployment.execute(validate_only=validate_only, duration=1, directory=tmp_path, source=tmp_path, prepare_catalog=prepare_catalog, catalog_feed=catalog_feed)
         assert result["io_started"] is False
         run.assert_not_called()
         assert not list(tmp_path.glob("next-session-*"))
     checkpoint.assert_called_once()
     assert warm.sync.call_count == int(prepare_catalog)
+    assert warm.import_feed.call_count == int(catalog_feed is not None)
 
 
 def test_real_synthetic_runtime_shutdown_and_restored_restart(tmp_path):
@@ -235,3 +236,7 @@ def test_supervisor_preserves_only_a_valid_explicit_source_route(tmp_path, monke
 
 def test_explicit_catalogue_preparation_precedes_a_real_checkpoint_without_starting_io(tmp_path, monkeypatch):
     _execute_fixture(tmp_path, monkeypatch, validate_only=True, prepare_catalog=True)
+
+
+def test_operator_catalogue_bootstrap_is_explicit_and_never_starts_io_in_validation(tmp_path, monkeypatch):
+    _execute_fixture(tmp_path, monkeypatch, validate_only=True, prepare_catalog=True, catalog_feed=tmp_path / 'verified.csv.gz')

@@ -201,6 +201,25 @@ class GutenbergClient:
                 if path:
                     path.unlink(missing_ok=True)
 
+    def import_feed(self, source: Path) -> None:
+        """Import an operator-supplied local feed without granting it rights authority."""
+        if source.is_symlink() or not source.is_file():
+            raise AppError("source_response_invalid")
+        if not self._lock.acquire(timeout=1):
+            raise AppError("source_rate_limited", retryable=True)
+        try:
+            info = source.stat()
+            if not 0 < info.st_size <= FEED_LIMIT or not 0 <= info.st_mtime <= time.time() + 300:
+                raise AppError("source_response_invalid")
+            with source.open("rb") as stream:
+                compressed = stream.read(FEED_LIMIT + 1)
+            self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self._index(compressed, min(info.st_mtime, time.time()), preserve_feed=True)
+        except OSError:
+            raise AppError("source_response_invalid") from None
+        finally:
+            self._lock.release()
+
     def sync(self) -> None:
         if self._age() < CATALOG_MAX_AGE:
             return

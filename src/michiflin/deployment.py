@@ -201,7 +201,7 @@ def checkpoint(store: PrivateStore, release: dict, runtime: Path, directory: Pat
 
 
 def execute(*, validate_only: bool, duration: int, directory: Path, source: Path,
-            prepare_catalog: bool = False) -> dict:
+            prepare_catalog: bool = False, catalog_feed: Path | None = None) -> dict:
     revision = os.environ.get("MICHIFLIN_DEPLOY_REVISION", "")
     if not re.fullmatch(r"[a-f0-9]{40}", revision):
         raise ValueError("An exact deployment revision is required")
@@ -232,8 +232,12 @@ def execute(*, validate_only: bool, duration: int, directory: Path, source: Path
                 raise ValueError("The selected snapshot digest does not match")
             runtime = work / "runtime"
             restore(downloaded, runtime, passphrase)
-            if prepare_catalog:
-                GutenbergClient(runtime / "state" / "catalog").sync()
+            if prepare_catalog or catalog_feed is not None:
+                books = GutenbergClient(runtime / "state" / "catalog")
+                if catalog_feed is not None:
+                    books.import_feed(catalog_feed)
+                if prepare_catalog:
+                    books.sync()
             stem = ("validation-" if validate_only else "session-") + uuid.uuid4().hex
             if not validate_only:
                 marker = work / (stem + ".running.json")
@@ -264,13 +268,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run a bounded private session with fail-closed checkpoint recovery")
     parser.add_argument("--validate-only", action="store_true", help="Verify real backup/restore without starting mail IO")
     parser.add_argument("--prepare-catalog", action="store_true", help="Explicitly prepare the bounded public feed before checkpointing or starting IO")
+    parser.add_argument("--catalog-feed", type=Path, help="Import an operator-verified local compressed public feed while preserving its fetch time")
     parser.add_argument("--duration", type=int, default=19200)
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--source", type=Path, default=Path("miniapp"))
     args = parser.parse_args()
     try:
         execute(validate_only=args.validate_only, duration=args.duration, directory=args.directory, source=args.source,
-                prepare_catalog=args.prepare_catalog)
+                prepare_catalog=args.prepare_catalog, catalog_feed=args.catalog_feed)
     except Exception:
         print("Private session stopped safely. No automatic rollback or unverified restart was attempted.", file=sys.stderr)
         raise SystemExit(1) from None
