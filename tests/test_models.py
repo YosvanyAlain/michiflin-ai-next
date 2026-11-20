@@ -211,3 +211,25 @@ def test_worker_receives_only_selected_provider_and_no_admin_configuration(monke
     assert b"unrelated" not in encoded and b"private@example.invalid" not in encoded
     assert "GITHUB_TOKEN" not in popen.call_args.kwargs["env"]
     assert popen.call_args.kwargs["env"]["LD_LIBRARY_PATH"] == "/synthetic/python/lib"
+
+
+@pytest.mark.parametrize('use_tools,local', [(False, False), (True, False), (True, True)])
+def test_bounded_worker_source_routing_is_explicit_and_excludes_local_models(monkeypatch, use_tools, local):
+    import subprocess
+    from unittest.mock import MagicMock
+
+    model = gateway()
+    if local:
+        model = ModelGateway(Settings(local_model_url='http://127.0.0.1:8091/v1/chat/completions'))
+    worker = MagicMock()
+    worker.__enter__.return_value = worker
+    worker.returncode = 0
+    worker.communicate.return_value = (json.dumps({'ok': True, 'data': {'text': 'OK'}}).encode(), b'')
+    start = Mock(return_value=worker)
+    monkeypatch.setattr(subprocess, 'Popen', start)
+    monkeypatch.setenv('MICHIFLIN_SOURCE_PROXY', 'socks5://127.0.0.1:40000')
+    monkeypatch.setenv('HTTPS_PROXY', 'http://ambient.example:8080')
+    assert model.complete_bounded('test', 'local' if local else 'synthetic', [], use_tools=use_tools)['text'] == 'OK'
+    environment = start.call_args.kwargs['env']
+    assert ('MICHIFLIN_SOURCE_PROXY' in environment) == (use_tools and not local)
+    assert 'HTTPS_PROXY' not in environment

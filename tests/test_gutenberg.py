@@ -189,3 +189,16 @@ def test_invalid_deflate_is_a_source_error_and_never_replaces_catalogue(tmp_path
     with pytest.raises(AppError, match='source_response_invalid'):
         GutenbergClient(tmp_path).sync()
     assert not (tmp_path / 'catalog.sqlite3').exists()
+
+
+def test_model_openlibrary_tool_keeps_its_separate_catalogue_client(source):
+    books, feed, metadata = source
+    public = Mock()
+    public.get.return_value = {'numFound': 1, 'docs': [{'key': '/works/OL1W', 'title': 'Catalogue only', 'ebook_access': 'no_ebook'}]}
+    tool = agent.tools(public, local_only=False, locale='en', book_client=books)['find_books']
+    result = tool.run({'source': 'openlibrary', 'title': 'Catalogue'})
+    assert result['books'][0]['title'] == 'Catalogue only'
+    assert result['books'][0]['downloads'] == []
+    assert public.get.call_args.args[0] == 'https://openlibrary.org/search.json'
+    feed.assert_not_called()
+    metadata.assert_not_called()

@@ -206,3 +206,25 @@ def test_real_synthetic_runtime_shutdown_and_restored_restart(tmp_path):
 
 def test_nonzero_runtime_exit_preserves_checkpoint_but_does_not_claim_success(tmp_path, monkeypatch):
     _execute_fixture(tmp_path, monkeypatch, validate_only=False, runtime_exit=1)
+
+
+@pytest.mark.parametrize('proxy', ['', 'socks5://127.0.0.1:40000', 'socks5://remote.example:40000'])
+def test_supervisor_preserves_only_a_valid_explicit_source_route(tmp_path, monkeypatch, proxy):
+    from michiflin.errors import AppError
+
+    monkeypatch.setenv('MICHIFLIN_SOURCE_PROXY', proxy)
+    monkeypatch.setenv('HTTPS_PROXY', 'http://ambient.example:8080')
+    process = Mock()
+    process.wait.return_value = 0
+    process.poll.return_value = 0
+    start = Mock(return_value=process)
+    monkeypatch.setattr(deployment.subprocess, 'Popen', start)
+    if 'remote' in proxy:
+        with pytest.raises(AppError, match='source_proxy_invalid'):
+            deployment.run_bounded(tmp_path, {'admin_keys': {}, 'providers': []}, 1, tmp_path)
+        start.assert_not_called()
+    else:
+        assert deployment.run_bounded(tmp_path, {'admin_keys': {}, 'providers': []}, 1, tmp_path) == 0
+        environment = start.call_args.kwargs['env']
+        assert environment.get('MICHIFLIN_SOURCE_PROXY', '') == proxy
+        assert 'HTTPS_PROXY' not in environment

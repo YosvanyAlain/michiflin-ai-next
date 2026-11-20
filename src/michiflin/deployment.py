@@ -18,6 +18,7 @@ from pathlib import Path
 import requests
 
 from .backup import LIMIT, create, restore
+from .egress import source_proxy
 from .storage import Ledger
 
 TAG = "michiflin-next-checkpoints-v1"
@@ -143,6 +144,8 @@ def validate_checkpoint(value: dict) -> dict:
 
 def run_bounded(runtime: Path, config: dict, duration: int, source: Path) -> int:
     environment = {key: os.environ[key] for key in ("PATH", "LANG", "LC_ALL", "SYSTEMROOT", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH") if key in os.environ}
+    if proxy := source_proxy():
+        environment["MICHIFLIN_SOURCE_PROXY"] = proxy
     environment.update({"PYTHONPATH": str(Path(__file__).resolve().parents[1]),
                         "MICHIFLIN_STATE_DIR": str(runtime / "state"), "MICHIFLIN_PUBLIC_ACCESS": "1",
                         "MICHIFLIN_ADMIN_KEYS": json.dumps(config["admin_keys"]),

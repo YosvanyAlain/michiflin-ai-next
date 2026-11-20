@@ -35,7 +35,7 @@ def tools(client, *, local_only: bool, locale: str, book_client=None) -> dict[st
             "find_books": Tool("Find books and verified access links, never download or send files.",
                                {"title": string, "author": string, "category": {"type": "string", "enum": ["", *library.CATEGORIES]},
                                 "source": {"type": "string", "enum": ["gutenberg", "openlibrary"]}}, (),
-                               lambda args: library.search(book_client if book_client is not None else client, library.BookQuery.parse(args))),
+                               lambda args: library.search(book_client if book_client is not None and args.get("source", "gutenberg") == "gutenberg" else client, library.BookQuery.parse(args))),
             "find_places": Tool("Find candidate places. Ask the user to disambiguate when needed.", {"query": string}, ("query",),
                                 lambda args: weather.locations(client, args.get("query"), locale)),
             "weather": Tool("Read modelled weather for explicit coordinates, not live station observations.",

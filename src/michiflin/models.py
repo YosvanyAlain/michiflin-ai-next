@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import requests
 
 from .config import Settings
+from .egress import source_proxy
 from .errors import AppError
 
 SYSTEM = (
@@ -97,6 +98,8 @@ class ModelGateway:
             raise AppError("invalid_prompt")
         environment = {key: os.environ[key] for key in ("PATH", "LANG", "LC_ALL", "SYSTEMROOT", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH") if key in os.environ}
         environment["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+        if use_tools and not local_only and model != "local" and (proxy := source_proxy()):
+            environment["MICHIFLIN_SOURCE_PROXY"] = proxy
         # The child receives only its selected provider and read-only tool configuration over a private pipe.
         with subprocess.Popen([sys.executable, "-m", "michiflin.model_worker"], stdin=subprocess.PIPE,
                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=environment) as worker:
