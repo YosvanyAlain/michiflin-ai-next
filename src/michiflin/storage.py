@@ -164,3 +164,7 @@ class Ledger:
                 return False
             db.execute("INSERT INTO deliveries VALUES(?,?)", (owner, now))
             return True
+
+    def revoke(self, instance: int) -> None:
+        with self.transaction() as db:
+            db.execute("UPDATE instances SET revoked=1 WHERE id=?", (instance,))

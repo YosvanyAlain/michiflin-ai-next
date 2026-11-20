@@ -56,3 +56,18 @@ def test_package_is_reproducible_complete_and_small(tmp_path):
 def test_package_refuses_missing_assets(tmp_path):
     with pytest.raises(ValueError, match="missing or unsafe"):
         build(tmp_path, tmp_path / "output")
+
+
+def test_locales_have_parity_and_cover_server_error_codes():
+    import re
+
+    root = Path(__file__).resolve().parents[1]
+    locales = []
+    for language in ("en", "es"):
+        text = (root / "miniapp" / "locales" / f"{language}.js").read_text()
+        start = text.index("{", text.index(f"window.MichiflinLocales.{language}"))
+        locales.append(json.loads(text[start:text.rindex("}") + 1]))
+    assert locales[0].keys() == locales[1].keys()
+    for source in (root / "src" / "michiflin").glob("*.py"):
+        codes = re.findall(r'AppError\("([a-z_]+)"', source.read_text())
+        assert set(codes) <= locales[0].keys(), source.name

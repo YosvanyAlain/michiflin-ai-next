@@ -28,6 +28,10 @@
   const chrome=()=>{
     for(const target of ["#desktop-navigation","#mobile-navigation"]){fill(document.querySelector(target),...nav.map(id=>el("button",{type:"button",class:"navigation-item","data-navigation":id,"aria-label":tr(id),onclick:()=>navigate(id)},icon(id),el("span",{},tr(id)))));}
     document.querySelectorAll("[data-i18n]").forEach(node=>{node.textContent=tr(node.dataset.i18n);});
+    document.querySelector(".skip").textContent=tr("skip_content");
+    document.querySelector("#desktop-navigation").setAttribute("aria-label",tr("main_navigation"));
+    document.querySelector("#mobile-navigation").setAttribute("aria-label",tr("mobile_navigation"));
+    document.querySelector("#preferences-close").setAttribute("aria-label",tr("close"));
     fill(document.querySelector("#preferences-button"),icon("settings"));
     document.querySelector("#preferences-button").setAttribute("aria-label",tr("settings"));
   };

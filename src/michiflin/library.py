@@ -50,10 +50,14 @@ class BookQuery:
 def _allowed_download(url: object) -> str:
     if not isinstance(url, str):
         return ""
-    parsed = urlsplit(url)
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError:
+        return ""
     if (parsed.scheme not in {"http", "https"} or parsed.username or parsed.password
             or parsed.hostname not in {"gutenberg.org", "www.gutenberg.org"}
-            or parsed.port not in (None, 80, 443)):
+            or port not in (None, 80, 443)):
         return ""
     return url
 
@@ -118,6 +122,8 @@ def _openlibrary(client: JsonClient, query: BookQuery) -> dict:
             params[key] = value
     if query.language:
         params["lang"] = query.language
+        language = {"en": "eng", "es": "spa", "fr": "fre", "de": "ger", "it": "ita", "pt": "por"}[query.language]
+        params["q"] += " AND language:" + language
     raw = client.get("https://openlibrary.org/search.json", params)
     rows = raw.get("docs")
     if not isinstance(rows, list):

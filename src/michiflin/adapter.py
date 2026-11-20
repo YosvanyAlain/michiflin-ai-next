@@ -95,12 +95,14 @@ class DeltaAdapter:
         principal = self.principal(message.chat_id, encrypted=message.show_padlock)
         self.service.ledger.authorize(instance, principal.storage_key, principal.chat_id)
         cursor = self.service.ledger.cursor(instance)
-        # Core returns at most a bounded batch. A subsequent core event drains later updates.
+        # Core returns all newer updates; revoke oversized streams instead of rereading forever.
         raw = self.rpc.get_webxdc_status_updates(self.account, instance, cursor)
         if not isinstance(raw, str) or len(raw) > 8_000_000:
+            self.service.ledger.revoke(instance)
             raise AppError("invalid_update_batch")
         updates = json.loads(raw)
         if not isinstance(updates, list) or len(updates) > 1000:
+            self.service.ledger.revoke(instance)
             raise AppError("invalid_update_batch")
         for update in updates:
             if not isinstance(update, dict):

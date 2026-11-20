@@ -156,3 +156,13 @@ def test_constructing_another_service_does_not_corrupt_active_work(connected):
 def principal_key():
     from michiflin.identity import Principal
     return Principal("reader@example.invalid", PEER, 20, True, True).storage_key
+
+
+def test_oversized_update_stream_is_revoked_instead_of_retried_forever(connected):
+    adapter, rpc, service = connected
+    rpc.updates = [{"serial": index + 1, "payload": {}} for index in range(1001)]
+    with pytest.raises(AppError, match="invalid_update_batch"):
+        adapter.status_update(42)
+    assert not service.ledger.has_instance(42)
+    adapter.status_update(42)
+    assert not rpc.sent
