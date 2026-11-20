@@ -205,7 +205,9 @@ def test_worker_receives_only_selected_provider_and_no_admin_configuration(monke
     popen = Mock(return_value=process)
     monkeypatch.setattr(subprocess, "Popen", popen)
     monkeypatch.setenv("GITHUB_TOKEN", "unrelated-github-secret")
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/synthetic/python/lib")
     model.complete_bounded("test", "synthetic", [])
     encoded = worker.communicate.call_args.args[0]
     assert b"unrelated" not in encoded and b"private@example.invalid" not in encoded
     assert "GITHUB_TOKEN" not in popen.call_args.kwargs["env"]
+    assert popen.call_args.kwargs["env"]["LD_LIBRARY_PATH"] == "/synthetic/python/lib"

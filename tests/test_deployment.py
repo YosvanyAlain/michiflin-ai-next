@@ -97,11 +97,13 @@ def test_shutdown_waits_for_runtime_before_backup_and_excludes_backup_secrets(tm
     monkeypatch.setenv("MICHIFLIN_BACKUP_TOKEN", "private-backup-token")
     monkeypatch.setenv("MICHIFLIN_BACKUP_PASSPHRASE", "private-backup-key")
     monkeypatch.setenv("GITHUB_TOKEN", "private-github-token")
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/synthetic/python/lib")
     result = deployment.run_bounded(tmp_path, {"admin_keys": {}, "providers": []}, 1, tmp_path)
     assert result == 0
     process.send_signal.assert_called_once_with(signal.SIGINT)
     environment = start.call_args.kwargs["env"]
     assert not any("BACKUP" in key or "GITHUB" in key for key in environment)
+    assert environment["LD_LIBRARY_PATH"] == "/synthetic/python/lib"
     assert start.call_args.kwargs["start_new_session"] is True
 
 

@@ -95,7 +95,7 @@ class ModelGateway:
             raise AppError("invalid_prompt") from None
         if len(encoded) > 100000:
             raise AppError("invalid_prompt")
-        environment = {key: os.environ[key] for key in ("PATH", "LANG", "LC_ALL", "SYSTEMROOT") if key in os.environ}
+        environment = {key: os.environ[key] for key in ("PATH", "LANG", "LC_ALL", "SYSTEMROOT", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH") if key in os.environ}
         environment["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
         # The child receives only its selected provider and read-only tool configuration over a private pipe.
         with subprocess.Popen([sys.executable, "-m", "michiflin.model_worker"], stdin=subprocess.PIPE,
