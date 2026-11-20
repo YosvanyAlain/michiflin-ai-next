@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from . import __version__, downloads, library, utilities, weather
 from .config import Settings
 from .errors import AppError
+from .gutenberg import GutenbergClient
 from .identity import Principal
 from .media import Media
 from .models import ModelGateway
@@ -30,15 +31,16 @@ class Service:
         self.settings = settings
         self.ledger = Ledger(settings.state_dir)
         self.client = client or JsonClient(contact=settings.contact)
+        self.books = GutenbergClient(settings.state_dir / "catalog") if client is None else client
         self.models = ModelGateway(settings)
         self.reader = Reader()
         self.media = Media()
         self.session = secrets.token_urlsafe(24)
         self.started = time.monotonic()
         self.operations = {
-            "library.search": Operation(lambda _p, args, _l: library.search(self.client, library.BookQuery.parse(args))),
+            "library.search": Operation(lambda _p, args, _l: library.search(self.books if args.get("source", "gutenberg") == "gutenberg" else self.client, library.BookQuery.parse(args))),
             "library.deliver": Operation(lambda p, args, _l, instance: downloads.prepare(
-                self.client, self.ledger, settings.state_dir / "deliveries", p, instance, args), instance=True),
+                self.books, self.ledger, settings.state_dir / "deliveries", p, instance, args), instance=True),
             "delivery.status": Operation(lambda p, args, _l: self.ledger.delivery_status(args.get("receipt"), p.storage_key)),
             "media.inspect": Operation(lambda _p, args, _l: self.media.inspect(args)),
             "web.read": Operation(lambda _p, args, _l: self.reader.read(args)),

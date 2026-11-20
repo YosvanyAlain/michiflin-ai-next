@@ -377,5 +377,7 @@ window.MichiflinLocales.es = {
   "media_privacy": "El bot consulta metadatos públicos sin tus cookies ni sesión. No se cargan reproductores, imágenes ni vídeo.",
   "invalid_youtube_url": "Usa un enlace HTTPS de un vídeo, Short o youtu.be, no una lista ni un canal.",
   "media_metadata_invalid": "YouTube no devolvió metadatos válidos del vídeo.",
-  "media_source_unavailable": "Los metadatos de YouTube no están disponibles. El vídeo puede ser privado, estar retirado o bloqueado desde este servidor."
+  "media_source_unavailable": "Los metadatos de YouTube no están disponibles. El vídeo puede ser privado, estar retirado o bloqueado desde este servidor.",
+  "catalog_partial": "No se pudieron verificar todas las fichas. Solo se muestran resultados verificados.",
+  "catalog_stale": "Se usa una copia anterior del catálogo. Los derechos se revisan antes del envío."
 };

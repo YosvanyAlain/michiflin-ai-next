@@ -19,6 +19,9 @@ from .egress import source_proxy
 from .errors import AppError
 
 MAX_BYTES = 1_000_000
+BINARY_TYPES = frozenset({"application/gzip", "application/x-gzip", "application/octet-stream", "application/epub+zip", "application/rdf+xml",
+                          "application/xml", "text/xml", "text/plain", "text/csv", "application/pdf",
+                          "application/x-mobipocket-ebook"})
 PAGE_TYPES = frozenset({"text/html", "application/xhtml+xml", "text/plain"})
 _RESOLVER = """import json,socket,sys
 print(json.dumps(sorted({x[4][0] for x in socket.getaddrinfo(sys.argv[1],443,type=socket.SOCK_STREAM)})))
@@ -147,11 +150,19 @@ class Document:
 class PublicHttp:
     """Cookie-free HTTPS reads pinned to vetted public addresses, including through SOCKS."""
 
-    def get(self, url: object, *, json_response: bool = False) -> Document:
+    def __init__(self, *, limit: int = MAX_BYTES, seconds: float = 25,
+                 hosts: frozenset[str] | None = None) -> None:
+        if type(limit) is not int or not 1 <= limit <= 32 * 1024 * 1024 or not 1 <= seconds <= 25:
+            raise ValueError("Invalid server-side public transport budget")
+        self.limit, self.seconds, self.hosts = limit, seconds, hosts
+
+    def get(self, url: object, *, json_response: bool = False, binary_response: bool = False) -> Document:
         url = normalize_url(url)
-        accepted_types = {"application/json"} if json_response else PAGE_TYPES
+        if json_response and binary_response:
+            raise ValueError("A single response mode is required")
+        accepted_types = {"application/json"} if json_response else BINARY_TYPES if binary_response else PAGE_TYPES
         proxy = source_proxy()
-        deadline = time.monotonic() + 25
+        deadline = time.monotonic() + self.seconds
         visited = set()
         try:
             for _ in range(5):
@@ -159,6 +170,8 @@ class PublicHttp:
                     raise AppError("web_response_limit")
                 visited.add(url)
                 parsed = urlsplit(url)
+                if self.hosts is not None and parsed.hostname not in self.hosts:
+                    raise AppError("web_destination_blocked")
                 addresses = resolve_public(parsed.hostname, max(.1, deadline - time.monotonic()))
                 if time.monotonic() >= deadline:
                     raise AppError("web_response_limit")
@@ -168,8 +181,8 @@ class PublicHttp:
                 timer.start()
                 try:
                     connection.request("GET", urlunsplit(("", "", parsed.path, parsed.query, "")), headers={
-                        "User-Agent": "Michiflin/0.1 (user-requested text reader)",
-                        "Accept": "application/json" if json_response else "text/html,application/xhtml+xml,text/plain;q=0.9",
+                        "User-Agent": "Michiflin/0.1 (user-requested public sources)",
+                        "Accept": "application/json" if json_response else "*/*" if binary_response else "text/html,application/xhtml+xml,text/plain;q=0.9",
                         "Accept-Encoding": "gzip", "Connection": "close",
                     })
                     with connection.getresponse() as response:
@@ -189,7 +202,7 @@ class PublicHttp:
                         if content_type.split(";", 1)[0].strip() not in accepted_types:
                             raise AppError("web_format_unsupported")
                         length = response.getheader("Content-Length")
-                        if length is not None and (not length.isdecimal() or int(length) > MAX_BYTES):
+                        if length is not None and (not length.isdecimal() or int(length) > self.limit):
                             raise AppError("web_response_limit")
                         encoding = response.getheader("Content-Encoding", "identity").lower().strip()
                         if encoding not in {"identity", "gzip"}:
@@ -198,10 +211,10 @@ class PublicHttp:
                         body, wire_size = bytearray(), 0
                         while chunk := response.read1(16384):
                             wire_size += len(chunk)
-                            if wire_size > MAX_BYTES or time.monotonic() >= deadline:
+                            if wire_size > self.limit or time.monotonic() >= deadline:
                                 raise AppError("web_response_limit")
-                            body.extend(decoder.decompress(chunk, MAX_BYTES + 1 - len(body)) if decoder else chunk)
-                            if len(body) > MAX_BYTES or decoder and decoder.unconsumed_tail:
+                            body.extend(decoder.decompress(chunk, self.limit + 1 - len(body)) if decoder else chunk)
+                            if len(body) > self.limit or decoder and decoder.unconsumed_tail:
                                 raise AppError("web_response_limit")
                         if time.monotonic() >= deadline:
                             raise AppError("web_response_limit")

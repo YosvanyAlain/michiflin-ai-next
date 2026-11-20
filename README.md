@@ -8,7 +8,7 @@ A new bilingual workspace for Delta Chat: thoughtful local utilities, an ebook d
 
 - An independent, responsive miniapp with English and Spanish interfaces, light/dark themes, accessible navigation, and reduced-motion support. Compact tool cards support local search and category filters.
 - Eighteen utility cards: offline arithmetic, dimensional unit conversion, text tools, device-only passwords, JSON, world clocks, notes, savings projections, date differences, Unicode/Base64/URL encoding, local file checksums, private image optimization, CSV/JSON table conversion, ZIP/EPUB metadata inspection, PCM WAV editing, connected weather, a low-bandwidth public web reader, and explicitly metadata-only YouTube previews.
-- Project Gutenberg discovery through Gutendex, with title, writer, subject, language, and verified format filters. Open Library is a separate catalogue/loan source, never advertised as a guaranteed download.
+- Project Gutenberg discovery through its official content mirror, with a bounded local catalogue and fresh per-book rights/format checks. Title, writer, subject, language, and verified format filters are supported. See [library boundaries](docs/LIBRARY.md). Open Library is a separate catalogue/loan source, never advertised as a guaranteed download.
 - Open-Meteo place disambiguation, modelled conditions, hourly forecasts, seven-day forecasts, and condition-driven weather effects. Saved or old data is not described as a live observation.
 - A transport-independent service layer with sender-and-key-bound instances, a durable request ledger, request identity checks, public-user quotas, and fail-closed administrator permissions.
 - An OpenAI-compatible model gateway that never substitutes online calls for an explicitly local request. Provider keys remain server-side and are never returned in the model catalogue.
@@ -40,7 +40,7 @@ This optional Linux x86-64 setup downloads roughly 515 MB. It binds to loopback 
 
 The private session supervisor, authenticated shutdown checkpoints and restored restart path are implemented and tested. Private backup validation has uploaded, downloaded and independently restored the real encrypted identity without starting production mail IO. An isolated synthetic profile has also opened the actual miniapp in Delta Chat Desktop and exercised offline tools, bilingual preferences and native file-export selection. Separately, a real encrypted two-account mail roundtrip verified public-member arithmetic and replay-safe notes on temporary accounts, not the production mailbox.
 
-Production remains stopped. Two requested administrator identities still require verified cryptographic pairing; actual Gutenberg downloads have not passed the live source gate, and the legacy hosting platform has an orphan queued-run inconsistency. Broader server-side media conversion, arbitrary platform downloads and archive extraction are **not** implemented by the local file tools. No runtime deployment workflow is enabled in this public repository. No built package or browser fixture is presented as a deployed production service.
+Production remains stopped. Two requested administrator identities still require verified cryptographic pairing, and the legacy hosting platform has an orphan queued-run inconsistency. The official-mirror Gutenberg search and a real validated EPUB have now passed an isolated encrypted two-account delivery test, including replay without duplicate delivery; this does not certify production hosting. Broader server-side media conversion, arbitrary platform downloads and archive extraction are **not** implemented by the local file tools. No runtime deployment workflow is enabled in this public repository. No built package or browser fixture is presented as a deployed production service.
 
 ## Local files and audio
 
@@ -74,6 +74,6 @@ Do not commit account databases, provider keys, personal administrator addresses
 
 ## Sources and artwork
 
-Book metadata: [Gutendex](https://gutendex.com/) and [Open Library](https://openlibrary.org/developers/api). Weather: [Open-Meteo](https://open-meteo.com/). Source availability and usage terms apply. Public-domain status varies by jurisdiction.
+Book catalogue and ebook metadata: [Project Gutenberg content mirror](https://gutenberg.pglaf.org/README) and [Open Library](https://openlibrary.org/developers/api). Weather: [Open-Meteo](https://open-meteo.com/). Source availability and usage terms apply. Public-domain status varies by jurisdiction.
 
 The hero illustration is AI-generated decorative artwork. It is packaged locally and does not fetch an external image. Book placeholders are typographic, not purported official covers.

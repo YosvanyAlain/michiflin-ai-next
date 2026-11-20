@@ -3,10 +3,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from . import downloads, library, weather
 from .errors import AppError
+from .gutenberg import GutenbergClient
 from .media import Media
 from .network import JsonClient
 from .reader import Reader
@@ -15,14 +18,16 @@ from .reader import Reader
 def check_sources() -> dict:
     def probe(name, run):
         try:
-            data = run(JsonClient())
+            with tempfile.TemporaryDirectory(prefix="michiflin-source-") as directory:
+                client = GutenbergClient(Path(directory)) if name == "gutenberg_catalog" else JsonClient()
+                data = run(client)
             return name, {"ok": True, "items": len(data.get("books", data.get("places", []))),
                           "forecast": data.get("data_kind") == "weather_model"}
         except AppError as error:
             return name, {"ok": False, "error": error.code}
 
     operations = [
-        ("gutendex", lambda client: library.search(client, library.BookQuery(title="Pride", format="epub"))),
+        ("gutenberg_catalog", lambda client: library.search(client, library.BookQuery(title="Pride", format="epub"))),
         ("openlibrary", lambda client: library.search(client, library.BookQuery(title="Don Quijote", source="openlibrary", language="es"))),
         ("geocoding", lambda client: weather.locations(client, "Singapore", "en")),
         ("forecast", lambda client: weather.forecast(client, 1.29, 103.85)),
@@ -33,7 +38,8 @@ def check_sources() -> dict:
 
 def check_download() -> dict:
     try:
-        metadata = JsonClient().get("https://gutendex.com/books/1342/")
+        with tempfile.TemporaryDirectory(prefix="michiflin-download-") as directory:
+            metadata = GutenbergClient(Path(directory)).metadata(1342)
         if metadata.get("id") != 1342 or metadata.get("copyright") is not False:
             raise AppError("book_rights_unverified")
         formats = metadata.get("formats")

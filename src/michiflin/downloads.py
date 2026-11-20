@@ -3,15 +3,12 @@ from __future__ import annotations
 import io
 import os
 import secrets
-import time
 import zipfile
 from pathlib import Path
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
 
-import requests
-
-from .egress import configure_source_session
 from .errors import AppError
+from .gutenberg import fetch, mirror_url
 from .library import FORMATS, _allowed_download
 
 MAX_BYTES = 24 * 1024 * 1024
@@ -44,29 +41,7 @@ def _validate(body: bytes, format: str) -> None:
 
 
 def fetch_bytes(url: str) -> bytes:
-    deadline = time.monotonic() + 50
-    try:
-        with requests.Session() as session:
-            configure_source_session(session)
-            session.headers["User-Agent"] = "Michiflin/0.1 (ebook delivery)"
-            for _ in range(4):
-                if not _allowed_download(url) or urlsplit(url).scheme != "https":
-                    raise AppError("source_not_allowed")
-                with session.get(url, timeout=(5, 15), stream=True, allow_redirects=False) as response:
-                    if response.status_code in {301, 302, 303, 307, 308}:
-                        url = urljoin(url, response.headers.get("Location", ""))
-                        continue
-                    if response.status_code != 200:
-                        raise AppError("source_unavailable", retryable=True)
-                    body = bytearray()
-                    for chunk in response.iter_content(32768):
-                        body.extend(chunk)
-                        if len(body) > MAX_BYTES or time.monotonic() > deadline:
-                            raise AppError("download_limit")
-                    return bytes(body)
-        raise AppError("download_invalid")
-    except requests.RequestException:
-        raise AppError("source_unavailable", retryable=True) from None
+    return fetch(mirror_url(url), limit=MAX_BYTES)
 
 
 def prepare(client, ledger, directory: Path, principal, instance: int, args: dict) -> dict:

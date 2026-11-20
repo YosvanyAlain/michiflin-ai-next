@@ -7,7 +7,7 @@ name = "michiflin-next"
 version = "0.1.0.dev0"
 description = "A bilingual, offline-first Delta Chat assistant and personal workspace"
 requires-python = ">=3.12"
-dependencies = ["requests[socks]>=2.32,<3"]
+dependencies = ["requests[socks]>=2.32,<3", "defusedxml>=0.7.1,<1"]
 
 [project.optional-dependencies]
 bot = ["deltachat2==2.58.0", "deltachat-rpc-server==2.58.0", "cryptography>=44,<47"]

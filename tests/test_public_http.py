@@ -291,3 +291,22 @@ def test_json_mode_is_explicit_and_keeps_default_reader_content_types_strict(tra
     responses.append(Response(body=b'{"type":"video"}', **{'Content-Type': 'application/json'}))
     with pytest.raises(AppError, match='web_format_unsupported'):
         web.PublicHttp().get('https://example.com/data')
+
+
+def test_fixed_mirror_policy_checks_each_redirect_before_dns_or_connection(transport):
+    responses, calls, resolutions = transport
+    responses.append(Response(status=302, Location='https://untrusted.example.com/file.epub'))
+    with pytest.raises(AppError, match='web_destination_blocked'):
+        web.PublicHttp(hosts=frozenset({'gutenberg.pglaf.org'})).get('https://gutenberg.pglaf.org/book', binary_response=True)
+    assert resolutions == ['gutenberg.pglaf.org'] and len(calls) == 1
+
+
+def test_binary_source_limits_do_not_increase_reader_or_json_budgets(transport):
+    responses, _, _ = transport
+    responses.append(Response(body=b'x' * 1_000_001, **{'Content-Type': 'application/octet-stream'}))
+    assert len(web.PublicHttp(limit=2_000_000).get('https://example.com/book', binary_response=True).body) == 1_000_001
+    responses.append(Response(body=b'x' * 1_000_001))
+    with pytest.raises(AppError, match='web_response_limit'):
+        web.PublicHttp().get('https://example.com/reader')
+    with pytest.raises(ValueError):
+        web.PublicHttp(limit=33 * 1024 * 1024)

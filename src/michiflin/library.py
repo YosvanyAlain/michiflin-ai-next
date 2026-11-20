@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from .errors import AppError
+from .gutenberg import GutenbergClient, fold, mirror_url
 from .network import JsonClient
 
 CATEGORIES = (
@@ -56,9 +57,14 @@ def _allowed_download(url: object) -> str:
     except ValueError:
         return ""
     if (parsed.scheme not in {"http", "https"} or parsed.username or parsed.password
-            or parsed.hostname not in {"gutenberg.org", "www.gutenberg.org"}
+            or parsed.hostname not in {"gutenberg.org", "www.gutenberg.org", "gutenberg.pglaf.org"}
             or port not in (None, 80, 443)):
         return ""
+    if parsed.hostname == "gutenberg.pglaf.org":
+        try:
+            mirror_url(url)
+        except AppError:
+            return ""
     return url
 
 
@@ -76,6 +82,8 @@ def _gutenberg(client: JsonClient, query: BookQuery) -> dict:
         params["languages"] = query.language
     if query.format:
         params["mime_type"] = FORMATS[query.format]
+    if isinstance(client, GutenbergClient):
+        params.update(title=query.title, author=query.author)
     raw = client.get("https://gutendex.com/books/", params)
     rows = raw.get("results")
     if not isinstance(rows, list):
@@ -89,9 +97,10 @@ def _gutenberg(client: JsonClient, query: BookQuery) -> dict:
             continue
         authors = [str(item.get("name", ""))[:160] for item in row.get("authors", []) if isinstance(item, dict)]
         title = str(row.get("title", ""))[:300]
-        if query.title.casefold() not in title.casefold():
+        normalize = fold if isinstance(client, GutenbergClient) else str.casefold
+        if normalize(query.title) not in normalize(title):
             continue
-        if query.author.casefold() not in " ".join(authors).casefold():
+        if normalize(query.author) not in normalize(" ".join(authors)):
             continue
         available = row.get("formats", {})
         downloads = []
@@ -110,7 +119,8 @@ def _gutenberg(client: JsonClient, query: BookQuery) -> dict:
                       "url": f"https://www.gutenberg.org/ebooks/{identifier}", "downloads": downloads,
                       "source": "Project Gutenberg", "access": "public_domain_us"})
     return {"books": books, "page": query.page, "has_more": bool(raw.get("next")),
-            "source_total": raw.get("count"), "source": "Project Gutenberg / Gutendex",
+            "source_total": raw.get("count"), "source": "Project Gutenberg / official mirror" if isinstance(client, GutenbergClient) else "Project Gutenberg / Gutendex",
+            "catalog_stale": raw.get("catalog_stale", False), "partial_results": raw.get("partial_results", False),
             "notice": "public_domain_jurisdiction", "filtered_page": True}
 
 

@@ -377,5 +377,7 @@ window.MichiflinLocales.en = {
   "media_privacy": "The bot queries public metadata without your cookies or login. No embedded player, images or video are loaded.",
   "invalid_youtube_url": "Use a public HTTPS YouTube video, Shorts or youtu.be link, not a playlist or channel.",
   "media_metadata_invalid": "YouTube did not return valid video metadata.",
-  "media_source_unavailable": "YouTube metadata is unavailable. The video may be private, removed or blocked from this host."
+  "media_source_unavailable": "YouTube metadata is unavailable. The video may be private, removed or blocked from this host.",
+  "catalog_partial": "Some records could not be verified. Showing only verified results.",
+  "catalog_stale": "Using an older catalogue copy. Rights are rechecked before delivery."
 };

@@ -83,7 +83,7 @@ class ModelGateway:
             raise AppError("invalid_prompt")
         self.endpoint(model, local_only=local_only)
         selected = [item for item in self.settings.online_providers if item.get("id") == model] if not local_only and model != "local" else []
-        settings = {"online_providers": selected,
+        settings = {"online_providers": selected, "state_dir": str(Path(self.settings.state_dir).resolve()),
                     "local_model_url": self.settings.local_model_url if local_only or model == "local" else "",
                     "local_model_key": self.settings.local_model_key if local_only or model == "local" else "",
                     "contact": self.settings.contact}

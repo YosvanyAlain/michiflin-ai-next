@@ -8,6 +8,7 @@ import requests
 from michiflin import diagnostics, downloads
 from michiflin.egress import configure_source_session
 from michiflin.errors import AppError
+from michiflin.gutenberg import GutenbergClient
 from michiflin.network import JsonClient
 
 
@@ -36,9 +37,8 @@ def test_ambient_proxy_settings_are_ignored(monkeypatch):
 
 
 @pytest.mark.parametrize("proxied", [False, True])
-@pytest.mark.parametrize("kind", ["json", "download"])
 @pytest.mark.parametrize("failure", [False, True])
-def test_source_clients_use_only_selected_route_without_silent_fallback(monkeypatch, kind, proxied, failure):
+def test_source_clients_use_only_selected_route_without_silent_fallback(monkeypatch, proxied, failure):
     monkeypatch.setenv("MICHIFLIN_SOURCE_PROXY", "socks5://127.0.0.1:40000" if proxied else "")
     monkeypatch.setenv("HTTPS_PROXY", "http://untrusted.example:8080")
     calls = []
@@ -49,18 +49,17 @@ def test_source_clients_use_only_selected_route_without_silent_fallback(monkeypa
             raise requests.ConnectionError("synthetic route failure")
         response = requests.Response()
         response.status_code = 200
-        response.raw = io.BytesIO(b'{"id":1342}' if kind == "json" else b"public-domain content")
+        response.raw = io.BytesIO(b'{"id":1342}')
         return response
 
     monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", send)
-    run = (lambda: JsonClient().get("https://gutendex.com/books/1342/")) if kind == "json" else (
-        lambda: downloads.fetch_bytes("https://www.gutenberg.org/ebooks/1342.epub3.images")
-    )
+    def run():
+        return JsonClient().get("https://gutendex.com/books/1342/")
     if failure:
         with pytest.raises(AppError, match="^source_unavailable$"):
             run()
     else:
-        assert run() == ({"id": 1342} if kind == "json" else b"public-domain content")
+        assert run() == {"id": 1342}
     assert len(calls) == 1
     assert dict(calls[0][1]["proxies"]) == ({"https": "socks5://127.0.0.1:40000"} if proxied else {})
     assert calls[0][1]["verify"] is True
@@ -75,7 +74,7 @@ def test_proxy_does_not_expand_source_allowlists(monkeypatch, url):
 
 
 def test_download_probe_requires_real_validated_bytes(monkeypatch):
-    monkeypatch.setattr(JsonClient, "get", lambda *_: {
+    monkeypatch.setattr(GutenbergClient, "metadata", lambda *_: {
         "id": 1342, "copyright": False,
         "formats": {"application/epub+zip": "https://www.gutenberg.org/ebooks/1342.epub3.images"},
     })
@@ -84,6 +83,6 @@ def test_download_probe_requires_real_validated_bytes(monkeypatch):
 
 
 def test_download_probe_never_fetches_unverified_rights(monkeypatch):
-    monkeypatch.setattr(JsonClient, "get", lambda *_: {"id": 1342, "copyright": True})
+    monkeypatch.setattr(GutenbergClient, "metadata", lambda *_: {"id": 1342, "copyright": True})
     monkeypatch.setattr(downloads, "fetch_bytes", lambda _: pytest.fail("must not fetch"))
     assert diagnostics.check_download() == {"ok": False, "error": "book_rights_unverified"}
