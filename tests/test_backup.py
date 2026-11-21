@@ -84,6 +84,14 @@ def test_native_snapshot_restores_account_ledger_and_pending_delivery_without_io
         store = ArtifactStore(ledger)
         artifact = store.put("synthetic-owner", 20, 42, "synthetic-artifact-ready", "private-copy.txt", b"Private synthetic file")
         missing = store.put("synthetic-owner", 20, 42, "synthetic-artifact-uncertain", "uncertain.txt", b"Uncertain synthetic file")
+        import tempfile
+
+        worker_body = b'Synthetic private worker output\x00\xff' * 1000
+        with tempfile.TemporaryFile() as output:
+            output.write(worker_body)
+            output.flush()
+            worker_file = store.import_output('synthetic-owner', 20, 42, 'synthetic-worker-output', 'result.bin', output,
+                                              {'bytes': len(worker_body), 'sha256': hashlib.sha256(worker_body).hexdigest()})
         (store.directory / (missing["id"] + ".blob")).unlink()
         with ledger.transaction() as db:
             db.execute("UPDATE artifacts SET state='uncertain' WHERE id=?", (missing["id"],))
@@ -120,6 +128,8 @@ def test_native_snapshot_restores_account_ledger_and_pending_delivery_without_io
         restored_store = ArtifactStore(restored_ledger)
         with restored_store.open("synthetic-owner", 20, 42, artifact["id"]) as stream:
             assert stream.read() == b"Private synthetic file"
+        with restored_store.open('synthetic-owner', 20, 42, worker_file['id']) as stream:
+            assert stream.read() == worker_body
         assert restored_store.directory.stat().st_mode & 0o777 == 0o700
         assert restored_store.get("synthetic-owner", 20, 42, missing["id"])["state"] == "uncertain"
         with pytest.raises(AppError, match="artifact_not_ready"), restored_store.open("synthetic-owner", 20, 42, missing["id"]):

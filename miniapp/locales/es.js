@@ -502,5 +502,8 @@ window.MichiflinLocales.es = {
   "job_state_failed": "Fallida",
   "job_state_cancelled": "Cancelada",
   "job_state_expired": "Caducada",
-  "job_state_uncertain": "Pendiente de verificación"
+  "job_state_uncertain": "Pendiente de verificación",
+  "invalid_sandbox_output": "El trabajador necesita un archivo de salida anónimo, privado y vacío.",
+  "sandbox_file_limit": "El archivo del trabajador supera el tamaño permitido.",
+  "invalid_artifact_output": "No se pudo verificar la salida privada del trabajador."
 };

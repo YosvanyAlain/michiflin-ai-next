@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import errno
+import fcntl
 import json
 import os
 import shutil
@@ -29,12 +30,13 @@ class Policy:
     memory_bytes: int = 128 * 1024 * 1024
     temporary_bytes: int = 8 * 1024 * 1024
     output_bytes: int = 64000
+    file_bytes: int = 16 * 1024 * 1024
 
     def __post_init__(self):
         for value, low, high in ((self.wall_seconds, 1, 60), (self.cpu_seconds, 1, 30),
                                  (self.memory_bytes, 64 * 1024 * 1024, 256 * 1024 * 1024),
                                  (self.temporary_bytes, 1024 * 1024, 32 * 1024 * 1024),
-                                 (self.output_bytes, 1024, 128000)):
+                                 (self.output_bytes, 1024, 128000), (self.file_bytes, 1024 * 1024, 16 * 1024 * 1024)):
             if type(value) is not int or not low <= value <= high:
                 raise ValueError("Invalid sandbox resource policy")
 
@@ -90,8 +92,39 @@ def _input_file(stream):
         yield source
 
 
+@contextmanager
+def _output_file(stream):
+    """Only empty private unlinked files can receive worker bytes; failure discards all output."""
+    if stream is None:
+        yield None
+        return
+    try:
+        descriptor = stream.fileno()
+        info = os.fstat(descriptor)
+        access = fcntl.fcntl(descriptor, fcntl.F_GETFL) & os.O_ACCMODE
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 0 or info.st_size != 0
+                or info.st_uid != os.getuid() or info.st_mode & 0o077 or access != os.O_RDWR):
+            raise AppError("invalid_sandbox_output")
+        stream.flush()
+        if os.fstat(descriptor).st_size:
+            raise AppError("invalid_sandbox_output")
+        reopened = os.open(f"/proc/self/fd/{descriptor}", os.O_RDWR | os.O_CLOEXEC)
+    except (AttributeError, OSError, TypeError, ValueError):
+        raise AppError("invalid_sandbox_output") from None
+    with os.fdopen(reopened, "r+b") as target:
+        try:
+            after = os.fstat(target.fileno())
+            if (info.st_dev, info.st_ino) != (after.st_dev, after.st_ino):
+                raise AppError("invalid_sandbox_output")
+            yield target
+        except BaseException:
+            os.ftruncate(target.fileno(), 0)
+            raise
+
+
 def run(script: str, payload: dict, *, policy: Policy | None = None,
-        stop: threading.Event | None = None, tick: Callable[[], None] | None = None, input_file=None) -> dict:
+        stop: threading.Event | None = None, tick: Callable[[], None] | None = None,
+        input_file=None, output_file=None) -> dict:
     """Run Python offline in Linux namespaces. No credentials, host workspace or child processes.
 
     This primitive is not a general user-facing code execution operation. Callers must enforce
@@ -112,7 +145,12 @@ def run(script: str, payload: dict, *, policy: Policy | None = None,
         raise AppError("sandbox_unavailable")
     # Anonymous descriptors avoid named artifacts, leaked prompts and cross-job work directories.
     with tempfile.TemporaryFile() as source, tempfile.TemporaryFile() as request, \
-            tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as rules, _input_file(input_file) as file_input:
+            tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as rules, \
+            _output_file(output_file) as file_output, _input_file(input_file) as file_input:
+        if file_output is not None and file_input is not None:
+            left, right = os.fstat(file_input.fileno()), os.fstat(file_output.fileno())
+            if (left.st_dev, left.st_ino) == (right.st_dev, right.st_ino):
+                raise AppError("invalid_sandbox_output")
         source.write(script.encode())
         source.seek(0)
         request.write(encoded)
@@ -137,15 +175,17 @@ def run(script: str, payload: dict, *, policy: Policy | None = None,
         if file_input is not None:
             command.extend(["--ro-bind-data", str(file_input.fileno()), "/input.bin"])
             descriptors += (file_input.fileno(),)
+        file_limit = policy.file_bytes if file_output is not None else max(policy.output_bytes, policy.temporary_bytes)
         command.extend(["--dev", "/dev", "--remount-ro", "/dev", "--size", str(policy.temporary_bytes),
                         "--tmpfs", "/tmp", "--ro-bind-data", str(source.fileno()), "/handler.py",
                         "--remount-ro", "/", "--chdir", "/tmp", "--seccomp", str(rules.fileno()), "--",
                         shutil.which("prlimit"), f"--as={policy.memory_bytes}", f"--cpu={policy.cpu_seconds}",
-                        f"--fsize={max(policy.output_bytes, policy.temporary_bytes)}", "--nofile=32", "--core=0", "--",
+                        f"--fsize={file_limit}", "--nofile=32", "--core=0", "--",
                         sys._base_executable, "-I", "-S", "-B", "/handler.py"])
         started = time.monotonic()
         try:
-            process = subprocess.Popen(command, stdin=request, stdout=output, stderr=subprocess.DEVNULL,
+            process = subprocess.Popen(command, stdin=request, stdout=file_output if file_output is not None else output,
+                                       stderr=output if file_output is not None else subprocess.DEVNULL,
                                        env={"PATH": "/usr/local/bin:/usr/bin:/bin"}, close_fds=True,
                                        pass_fds=descriptors, start_new_session=True)
         except OSError:
@@ -186,6 +226,8 @@ def run(script: str, payload: dict, *, policy: Policy | None = None,
             raise AppError("sandbox_result_invalid") from None
         if not isinstance(result, dict):
             raise AppError("sandbox_result_invalid")
+        if file_output is not None and os.fstat(file_output.fileno()).st_size > policy.file_bytes:
+            raise AppError("sandbox_file_limit")
         return result
 
 

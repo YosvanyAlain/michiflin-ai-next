@@ -502,5 +502,8 @@ window.MichiflinLocales.en = {
   "job_state_failed": "Failed",
   "job_state_cancelled": "Cancelled",
   "job_state_expired": "Expired",
-  "job_state_uncertain": "Needs verification"
+  "job_state_uncertain": "Needs verification",
+  "invalid_sandbox_output": "The worker requires an empty, private anonymous output file.",
+  "sandbox_file_limit": "The worker file exceeds the allowed size.",
+  "invalid_artifact_output": "The private worker output could not be verified."
 };

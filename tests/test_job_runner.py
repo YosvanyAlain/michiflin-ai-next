@@ -264,3 +264,28 @@ def test_worker_callback_failure_reaps_before_releasing_artifact_pin(isolated, q
         runner.run_once()
     assert status(queue, job)['state'] == 'uncertain' and status(queue, job)['worker_stopped']
     assert store.delete('owner', 10, 1, artifact['id'])['deleted']
+
+
+def test_real_isolated_binary_result_can_be_verified_and_published_without_a_host_path(isolated, queue):
+    import tempfile
+
+    from michiflin.artifacts import ArtifactStore
+
+    store = ArtifactStore(queue.ledger)
+    body = b'synthetic private source' * 10000
+    original = store.put('owner', 10, 1, 'synthetic-file-input', 'source.bin', body)
+    script = '''import sys,json,hashlib
+h=hashlib.sha256(); size=0
+with open('/input.bin','rb') as source:
+    for block in iter(lambda:source.read(65536),b''):
+        data=block.upper(); sys.stdout.buffer.write(data); h.update(data); size+=len(data)
+print(json.dumps({'bytes':size,'sha256':h.hexdigest()}),file=sys.stderr)
+'''
+    with store.open('owner', 10, 1, original['id']) as source, tempfile.TemporaryFile() as output:
+        result = sandbox.run(script, {}, input_file=source, output_file=output)
+        published = store.import_output('owner', 10, 1, 'synthetic-worker-output', 'result.bin', output, result)
+    assert published['state'] == 'ready' and published['id'] != original['id']
+    with store.open('owner', 10, 1, published['id']) as output:
+        assert output.read() == body.upper()
+    with store.open('owner', 10, 1, original['id']) as source:
+        assert source.read() == body

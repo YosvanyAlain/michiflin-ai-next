@@ -6,6 +6,7 @@ import json
 import os
 import re
 import secrets
+import stat
 import time
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
@@ -172,6 +173,30 @@ class ArtifactStore:
             _same(before, os.fstat(stream.fileno()))
             stream.seek(0)
             return self._copy(owner, chat, instance, request_id, name, stream, before.st_size, digest.hexdigest())
+
+    def import_output(self, owner, chat, instance, request_id, name, source, metadata):
+        """Trusted post-reap publication only. Descriptor/metadata are never accepted as member arguments."""
+        filename(name)
+        self.ledger.authorize(instance, owner, chat)
+        if (not isinstance(metadata, dict) or set(metadata) != {"bytes", "sha256"}
+                or type(metadata["bytes"]) is not int or not 0 <= metadata["bytes"] <= self.limits.file_bytes
+                or not _sha(metadata["sha256"])):
+            raise AppError("invalid_artifact_output")
+        try:
+            descriptor = source.fileno()
+            before = os.fstat(descriptor)
+            if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 0 or before.st_uid != os.getuid()
+                    or before.st_mode & 0o077 or before.st_size != metadata["bytes"]):
+                raise AppError("invalid_artifact_output")
+            source.flush()
+            _same(before, os.fstat(descriptor))
+            reopened = os.open(f"/proc/self/fd/{descriptor}", os.O_RDONLY | os.O_CLOEXEC)
+        except (AttributeError, OSError, TypeError, ValueError):
+            raise AppError("invalid_artifact_output") from None
+        with os.fdopen(reopened, "rb") as stream:
+            _same(before, os.fstat(stream.fileno()))
+            return self._copy(owner, chat, instance, request_id, name, stream,
+                              metadata["bytes"], metadata["sha256"])
 
     def _copy(self, owner, chat, instance, request_id, name, stream, size, expected):
         row, fresh = self._admit(owner, chat, instance, request_id, name, size, expected)

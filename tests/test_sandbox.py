@@ -238,3 +238,139 @@ def test_hardlinked_input_is_rejected_without_starting_worker(isolated, tmp_path
     monkeypatch.setattr(sandbox.subprocess, 'Popen', lambda *a, **k: pytest.fail('Must not start'))
     with source.open('rb') as stream, pytest.raises(AppError, match='invalid_sandbox_file'):
         sandbox.run('print("{}")', {}, input_file=stream)
+
+
+def test_real_binary_output_is_private_anonymous_and_independent_of_json_channel(isolated, tmp_path):
+    import hashlib
+    source = tmp_path / 'input'
+    source.write_bytes(b'synthetic bytes' * 100000)
+    script = '''import json,sys,hashlib,os,fcntl
+h=hashlib.sha256(); size=0
+with open('/input.bin','rb') as source:
+    for block in iter(lambda:source.read(65536),b''):
+        block=block.upper(); h.update(block); size+=len(block); sys.stdout.buffer.write(block)
+extra=[]
+for fd in range(3,32):
+    try: fcntl.fcntl(fd,fcntl.F_GETFD); extra.append(fd)
+    except OSError: pass
+print(json.dumps({'bytes':size,'sha256':h.hexdigest(),'extra_fds':extra,
+                  'output_path':os.path.exists('/output.bin'),'proc':os.path.exists('/proc')}),file=sys.stderr)
+'''
+    with source.open('rb') as input_file, tempfile.TemporaryFile() as output_file:
+        result = sandbox.run(script, {}, input_file=input_file, output_file=output_file)
+        assert output_file.tell() == 0
+        transformed = output_file.read()
+    assert transformed == source.read_bytes().upper()
+    assert result == {'bytes': len(transformed), 'sha256': hashlib.sha256(transformed).hexdigest(),
+                      'extra_fds': [], 'output_path': False, 'proc': False}
+    assert source.read_bytes() == b'synthetic bytes' * 100000
+
+
+def test_binary_file_limit_is_kernel_enforced_even_with_larger_tmpfs_budget(isolated):
+    policy = replace(sandbox.Policy(), file_bytes=1024 * 1024, temporary_bytes=32 * 1024 * 1024)
+    script = '''import json,sys,os
+try:
+    for i in range(20): os.write(1,b'x'*65536)
+    result={'limited':False}
+except OSError as error:
+    result={'limited':True,'errno':error.errno}
+print(json.dumps(result),file=sys.stderr)
+'''
+    with tempfile.TemporaryFile() as output:
+        result = sandbox.run(script, {}, output_file=output, policy=policy)
+        assert result == {'limited': True, 'errno': 27}
+        assert os.fstat(output.fileno()).st_size == 1024 * 1024
+
+
+@pytest.mark.parametrize('failure,expected', [
+    ('raise RuntimeError("synthetic-private-worker-error")', 'sandbox_execution_failed'),
+    ('print("not JSON",file=sys.stderr)', 'sandbox_result_invalid'),
+    ('print("x"*500000,file=sys.stderr)', 'sandbox_output_limit'),
+    ('while True: os.write(1,b"x"*65536)', 'sandbox_execution_failed'),
+])
+def test_binary_failure_discards_partial_bytes_and_never_exposes_worker_error(isolated, failure, expected):
+    script = 'import os,sys\nos.write(1,b"synthetic partial output")\n' + failure
+    with tempfile.TemporaryFile() as output:
+        with pytest.raises(AppError, match='^' + expected + '$'):
+            sandbox.run(script, {}, output_file=output, policy=replace(sandbox.Policy(), file_bytes=1024 * 1024))
+        assert os.fstat(output.fileno()).st_size == 0
+
+
+def test_binary_cancellation_and_callback_failures_reap_and_discard_before_returning(isolated):
+    script = 'import os,time; os.write(1,b"partial"); time.sleep(30)'
+    stop = threading.Event()
+    timer = threading.Timer(0.15, stop.set)
+    timer.start()
+    try:
+        with tempfile.TemporaryFile() as output:
+            with pytest.raises(AppError, match='sandbox_cancelled'):
+                sandbox.run(script, {}, output_file=output, stop=stop)
+            assert os.fstat(output.fileno()).st_size == 0
+    finally:
+        timer.join()
+    def fail():
+        raise RuntimeError('synthetic supervisor callback failure')
+    with tempfile.TemporaryFile() as output:
+        with pytest.raises(RuntimeError, match='synthetic supervisor callback failure'):
+            sandbox.run(script, {}, output_file=output, tick=fail)
+        assert os.fstat(output.fileno()).st_size == 0
+
+
+def test_binary_wall_timeout_discards_before_caller_can_publish(isolated):
+    with tempfile.TemporaryFile() as output:
+        with pytest.raises(AppError, match='sandbox_timeout'):
+            sandbox.run('import os,time; os.write(1,b"partial"); time.sleep(30)', {}, output_file=output,
+                        policy=replace(sandbox.Policy(), wall_seconds=1))
+        assert output.read() == b''
+
+
+def test_binary_output_preflight_preserves_rejected_existing_files(isolated, tmp_path, monkeypatch):
+    import io
+    named = tmp_path / 'named'
+    named.write_bytes(b'original')
+    monkeypatch.setattr(sandbox.subprocess, 'Popen', lambda *a, **k: pytest.fail('Must not launch'))
+    with named.open('r+b') as stream, pytest.raises(AppError, match='invalid_sandbox_output'):
+        sandbox.run('print("{}")', {}, output_file=stream)
+    assert named.read_bytes() == b'original'
+    with tempfile.TemporaryFile() as stream:
+        stream.write(b'buffered original')
+        with pytest.raises(AppError, match='invalid_sandbox_output'):
+            sandbox.run('print("{}")', {}, output_file=stream)
+        stream.seek(0)
+        assert stream.read() == b'buffered original'
+    with tempfile.TemporaryFile() as stream:
+        os.fchmod(stream.fileno(), 0o644)
+        with pytest.raises(AppError, match='invalid_sandbox_output'):
+            sandbox.run('print("{}")', {}, output_file=stream)
+    for stream in (io.BytesIO(), str(named)):
+        with pytest.raises(AppError, match='invalid_sandbox_output'):
+            sandbox.run('print("{}")', {}, output_file=stream)
+    with open('/dev/null', 'r+b') as stream, pytest.raises(AppError, match='invalid_sandbox_output'):
+        sandbox.run('print("{}")', {}, output_file=stream)
+
+
+def test_input_and_output_descriptors_cannot_alias(isolated, monkeypatch):
+    monkeypatch.setattr(sandbox.subprocess, 'Popen', lambda *a, **k: pytest.fail('Must not launch'))
+    with tempfile.TemporaryFile() as stream, pytest.raises(AppError, match='invalid_sandbox_output'):
+        sandbox.run('print("{}")', {}, input_file=stream, output_file=stream)
+
+
+@pytest.mark.parametrize('value', [True, 0, 1000, 16 * 1024 * 1024 + 1])
+def test_binary_policy_limits_are_trusted_but_still_bounded(value):
+    with pytest.raises(ValueError):
+        sandbox.Policy(file_bytes=value)
+
+
+def test_full_binary_output_budget_is_real_not_json_base64_or_host_workspace_access(isolated):
+    import hashlib
+    script = '''import os,sys,json
+for index in range(256): os.write(1,b'x'*65536)
+print(json.dumps({'bytes':os.fstat(1).st_size}),file=sys.stderr)
+'''
+    with tempfile.TemporaryFile() as output:
+        result = sandbox.run(script, {}, output_file=output)
+        assert result == {'bytes': 16 * 1024 * 1024}
+        digest = hashlib.sha256()
+        for block in iter(lambda: output.read(65536), b''):
+            digest.update(block)
+        assert digest.hexdigest() == hashlib.sha256(b'x' * (16 * 1024 * 1024)).hexdigest()

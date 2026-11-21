@@ -340,3 +340,95 @@ def test_failed_import_history_cannot_hide_ready_files_from_bounded_listing(stor
     files = store.list('owner-a', 10, 1)['files']
     assert len(files) == 50
     assert files[0]['id'] == file['id']
+
+
+def output_metadata(body):
+    return {'bytes': len(body), 'sha256': hashlib.sha256(body).hexdigest()}
+
+
+def test_private_post_reap_output_is_copied_verified_and_replayed_without_recreation(store):
+    import tempfile
+    body = b'synthetic verified worker output\x00\xff'
+    with tempfile.TemporaryFile() as source:
+        source.write(body)
+        source.flush()
+        source.seek(3)
+        first = store.import_output('owner-a', 10, 1, 'synthetic-worker-output', 'result.bin', source, output_metadata(body))
+        assert source.tell() == 3
+        assert store.import_output('owner-a', 10, 1, 'synthetic-worker-output', 'result.bin', source, output_metadata(body)) == first
+        with store.open('owner-a', 10, 1, first['id']) as copied:
+            assert copied.read() == body
+        assert store.delete('owner-a', 10, 1, first['id'])['deleted']
+        assert store.import_output('owner-a', 10, 1, 'synthetic-worker-output', 'result.bin', source, output_metadata(body))['state'] == 'deleted'
+        source.seek(0)
+        assert source.read() == body
+    assert not list(store.directory.iterdir())
+
+
+@pytest.mark.parametrize('metadata', [None, {}, {'bytes': True, 'sha256': 'a' * 64},
+    {'bytes': -1, 'sha256': 'a' * 64}, {'bytes': MAX_FILE + 1, 'sha256': 'a' * 64},
+    {'bytes': 0, 'sha256': 'invalid'}, {'bytes': 0, 'sha256': 'a' * 64, 'path': '/host/path'}])
+def test_invalid_output_metadata_is_rejected_without_inventory_or_files(store, metadata):
+    import tempfile
+    with tempfile.TemporaryFile() as source, pytest.raises(AppError, match='invalid_artifact_output'):
+        store.import_output('owner-a', 10, 1, 'synthetic-worker-output', 'result.bin', source, metadata)
+    assert store.list('owner-a', 10, 1)['files'] == []
+    assert not list(store.directory.iterdir())
+
+
+def test_output_publication_refuses_host_paths_named_files_unsafe_modes_and_size_mismatch(store, tmp_path):
+    import io
+    import tempfile
+    named = tmp_path / 'preserve'
+    named.write_bytes(b'original')
+    with named.open('rb') as source, pytest.raises(AppError, match='invalid_artifact_output'):
+        store.import_output('owner-a', 10, 1, 'synthetic-worker-output', 'result.bin', source, output_metadata(b'original'))
+    assert named.read_bytes() == b'original'
+    for source in (io.BytesIO(), str(named)):
+        with pytest.raises(AppError, match='invalid_artifact_output'):
+            store.import_output('owner-a', 10, 1, 'synthetic-worker-output', 'result.bin', source, output_metadata(b''))
+    with tempfile.TemporaryFile() as source:
+        os.fchmod(source.fileno(), 0o644)
+        with pytest.raises(AppError, match='invalid_artifact_output'):
+            store.import_output('owner-a', 10, 1, 'synthetic-worker-output', 'result.bin', source, output_metadata(b''))
+    with tempfile.TemporaryFile() as source, pytest.raises(AppError, match='invalid_artifact_output'):
+        store.import_output('owner-a', 10, 1, 'synthetic-worker-output', 'result.bin', source, output_metadata(b'not present'))
+    assert store.list('owner-a', 10, 1)['files'] == []
+
+
+def test_bad_output_hash_leaves_failed_replay_guard_not_a_partial_or_ready_copy(store):
+    import tempfile
+    body = b'synthetic bytes'
+    metadata = {'bytes': len(body), 'sha256': '0' * 64}
+    with tempfile.TemporaryFile() as source:
+        source.write(body)
+        source.flush()
+        with pytest.raises(AppError, match='artifact_source_changed'):
+            store.import_output('owner-a', 10, 1, 'synthetic-worker-output', 'result.bin', source, metadata)
+        replay = store.import_output('owner-a', 10, 1, 'synthetic-worker-output', 'result.bin', source, metadata)
+        assert replay['state'] == 'failed'
+    assert not list(store.directory.iterdir())
+    with store.ledger.connection() as db:
+        assert db.execute('SELECT reserved FROM artifacts').fetchone()[0] == 0
+
+
+def test_output_authorization_precedes_descriptor_access(store):
+    class PrivateDescriptor:
+        def fileno(self):
+            pytest.fail('Untrusted binding must never inspect a descriptor')
+    with pytest.raises(AppError, match='instance_not_authorized'):
+        store.import_output('owner-b', 10, 1, 'synthetic-worker-output', 'result.bin', PrivateDescriptor(), output_metadata(b''))
+
+
+def test_output_storage_quota_is_enforced_without_modifying_staging_bytes(store):
+    import tempfile
+    store.limits = replace(store.limits, owner_files=1)
+    put(store)
+    with tempfile.TemporaryFile() as source:
+        source.write(b'output')
+        source.flush()
+        with pytest.raises(AppError, match='artifact_storage_limit'):
+            store.import_output('owner-a', 10, 1, 'synthetic-worker-output', 'result.bin', source, output_metadata(b'output'))
+        source.seek(0)
+        assert source.read() == b'output'
+    assert len(store.list('owner-a', 10, 1)['files']) == 1
