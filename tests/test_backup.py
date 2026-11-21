@@ -60,6 +60,7 @@ def test_native_snapshot_restores_account_ledger_and_pending_delivery_without_io
     interrupted = jobs.enqueue("synthetic-owner", 20, 42, "synthetic-job-interrupted", "synthetic.v1", {})
     interrupted_claim = jobs.claim()
     jobs.heartbeat(interrupted_claim, current=1, total=2, checkpoint={"part": 1})
+    assert jobs.begin_publication(interrupted_claim)
     queued = jobs.enqueue("synthetic-owner", 20, 42, "synthetic-job-queued", "synthetic.v1", {})
     deliveries = ledger.path.parent / "deliveries"
     deliveries.mkdir()
@@ -115,6 +116,7 @@ def test_native_snapshot_restores_account_ledger_and_pending_delivery_without_io
     restored_ledger.recover_interrupted()
     assert restored_jobs.get("synthetic-owner", 20, 42, completed["id"])["result"] == {"receipt": "confirmed-synthetic-result"}
     assert restored_jobs.get("synthetic-owner", 20, 42, interrupted["id"])["state"] == "uncertain"
+    assert restored_jobs.get("synthetic-owner", 20, 42, interrupted["id"])["publishing"]
     assert not restored_jobs.get("synthetic-owner", 20, 42, interrupted["id"])["worker_stopped"]
     assert restored_jobs.get("synthetic-owner", 20, 42, queued["id"])["state"] == "queued"
     assert restored_jobs.claim() is None  # A restored lease never proves the old worker has stopped.

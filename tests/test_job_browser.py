@@ -148,3 +148,21 @@ def test_uncertain_job_has_no_retry_or_control_and_foreign_kinds_are_text_only(t
         assert page.locator('[data-required-operation="jobs.control"]').count() == 0
         assert not page.evaluate("window.__requests.some(r=>r.op==='jobs.control')")
         assert errors == []
+
+
+@pytest.mark.parametrize('engine,locale', [('chromium', 'en'), ('webkit', 'es')])
+def test_private_publication_intent_has_no_false_pause_cancel_or_retry_controls(tmp_path, engine, locale):
+    def prepare(service, principal):
+        from michiflin.jobs import Kind
+        service.jobs.kinds = {'synthetic.v1': Kind(lambda _: None)}
+        service.jobs.enqueue(principal.storage_key, 20, 42, 'synthetic-publication-job', 'synthetic.v1', {})
+        assert service.jobs.begin_publication(service.jobs.claim())
+    with browser(tmp_path, locale, engine, configure_service=prepare) as (page, errors):
+        page.evaluate("location.hash='server_jobs'")
+        page.locator('[data-required-operation="jobs.list"]').click()
+        page.locator('.job-row').wait_for()
+        label = 'Publishing private result' if locale == 'en' else 'Publicando resultado privado'
+        assert label in page.locator('.job-row').inner_text()
+        assert page.locator('[data-required-operation="jobs.control"]').count() == 0
+        assert not page.evaluate("window.__requests.some(r=>r.op==='jobs.control')")
+        assert errors == []

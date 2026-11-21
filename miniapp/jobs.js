@@ -20,7 +20,7 @@
       }
     };
     const valid=row=>{
-      if(!row||!/^[a-f0-9]{32}$/.test(row.id)||typeof row.kind!=="string"||row.kind.length>80||!states.has(row.state)||typeof row.worker_stopped!=="boolean"||!Number.isSafeInteger(row.current)||!Number.isSafeInteger(row.total)||row.current<0||row.current>row.total||row.total>1e12||(row.error!=null&&(typeof row.error!=="string"||row.error.length>64)))throw new Error("result_invalid");
+      if(!row||!/^[a-f0-9]{32}$/.test(row.id)||typeof row.kind!=="string"||row.kind.length>80||!states.has(row.state)||typeof row.worker_stopped!=="boolean"||!Number.isSafeInteger(row.current)||!Number.isSafeInteger(row.total)||row.current<0||row.current>row.total||row.total>1e12||(row.publishing!==undefined&&typeof row.publishing!=="boolean")||(row.error!=null&&(typeof row.error!=="string"||row.error.length>64)))throw new Error("result_invalid");
       return row;
     };
     const request=async(op,args,done)=>{
@@ -52,15 +52,16 @@
       if(!rows.length)list.append(el("p",{class:"caption"},tr("server_jobs_empty")));
       for(const row of rows){
         const actions=el("div",{class:"server-file-actions"});
-        if(["queued","running"].includes(row.state))actions.append(remote("job_pause",()=>control(row,"pause"),"jobs.control"));
-        if(row.state==="paused"&&row.worker_stopped)actions.append(remote("job_resume",()=>control(row,"resume"),"jobs.control"));
-        if(["queued","running","pausing","paused"].includes(row.state))actions.append(remote("job_cancel",()=>cancel(row),"jobs.control","text"));
+        const publishing=row.publishing&&["running","pausing","cancelling"].includes(row.state);
+        if(!row.publishing&&["queued","running"].includes(row.state))actions.append(remote("job_pause",()=>control(row,"pause"),"jobs.control"));
+        if(!row.publishing&&row.state==="paused"&&row.worker_stopped)actions.append(remote("job_resume",()=>control(row,"resume"),"jobs.control"));
+        if(!row.publishing&&["queued","running","pausing","paused"].includes(row.state))actions.append(remote("job_cancel",()=>cancel(row),"jobs.control","text"));
         actions.append(remote("job_inspect",()=>request("jobs.status",{id:row.id},data=>{
           if(data.id!==row.id)throw new Error("result_invalid");update(data);
         }),"jobs.status","text"));
         const result=row.kind==="files.checksum.v1"&&row.state==="completed"?row.result:null;
         if(result&&(!Number.isSafeInteger(result.bytes)||result.bytes<0||!/^[a-f0-9]{64}$/.test(result.sha256)))throw new Error("result_invalid");
-        list.append(el("article",{class:"paper-panel job-row","data-job-id":row.id,"data-job-state":row.state},el("h3",{},row.kind==="files.checksum.v1"?tr("server_file_verify"):row.kind),el("p",{class:"caption"},tr("job_state_"+row.state)+" · "+tr(row.worker_stopped?"job_worker_stopped":"job_worker_owned")),el("code",{class:"job-id"},row.id),row.total?el("progress",{max:row.total,value:row.current,"aria-label":tr("job_progress")}):null,row.error?el("p",{class:"caption"},tr(row.error)):null,row.state==="uncertain"?el("p",{class:"caption"},tr("job_uncertain_notice")):null,result?el("details",{open:true},el("summary",{},"SHA-256 · "+result.bytes+" B"),el("code",{},result.sha256)):null,actions));
+        list.append(el("article",{class:"paper-panel job-row","data-job-id":row.id,"data-job-state":row.state},el("h3",{},row.kind==="files.checksum.v1"?tr("server_file_verify"):row.kind),el("p",{class:"caption"},tr(publishing?"job_state_publishing":"job_state_"+row.state)+" · "+tr(row.worker_stopped?"job_worker_stopped":"job_worker_owned")),el("code",{class:"job-id"},row.id),row.total?el("progress",{max:row.total,value:row.current,"aria-label":tr("job_progress")}):null,row.error?el("p",{class:"caption"},tr(row.error)):null,row.state==="uncertain"?el("p",{class:"caption"},tr("job_uncertain_notice")):null,result?el("details",{open:true},el("summary",{},"SHA-256 · "+result.bytes+" B"),el("code",{},result.sha256)):null,actions));
       }
     };
     panel.append(el("div",{class:"tool-workbench"},el("p",{class:"caption"},tr("server_jobs_notice")),el("div",{class:"server-file-actions"},remote("server_jobs_refresh",()=>request("jobs.list",{},data=>{

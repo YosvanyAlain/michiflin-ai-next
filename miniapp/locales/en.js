@@ -505,5 +505,8 @@ window.MichiflinLocales.en = {
   "job_state_uncertain": "Needs verification",
   "invalid_sandbox_output": "The worker requires an empty, private anonymous output file.",
   "sandbox_file_limit": "The worker file exceeds the allowed size.",
-  "invalid_artifact_output": "The private worker output could not be verified."
+  "invalid_artifact_output": "The private worker output could not be verified.",
+  "job_publication_started": "Private output publication has started. Its outcome must be confirmed before any retry or cleanup.",
+  "job_kind_budget_mismatch": "The reviewed task requires a larger private storage reservation. Execution is disabled.",
+  "job_state_publishing": "Publishing private result"
 };

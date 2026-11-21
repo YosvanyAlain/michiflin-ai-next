@@ -33,9 +33,11 @@ def _json(value: object, maximum: int) -> str:
 class Kind:
     validate: Callable[[dict], None] = field(repr=False)
     seconds: int = 60
+    minimum_bytes: int = 0
 
     def __post_init__(self):
-        if not callable(self.validate) or type(self.seconds) is not int or not 1 <= self.seconds <= 900:
+        if (not callable(self.validate) or type(self.seconds) is not int or not 1 <= self.seconds <= 900
+                or type(self.minimum_bytes) is not int or not 0 <= self.minimum_bytes <= 256 * 1024 * 1024):
             raise ValueError("Invalid trusted job kind")
 
 
@@ -110,6 +112,10 @@ class JobQueue:
                     outcome TEXT NOT NULL, evidence_sha256 TEXT NOT NULL
                 );
             """)
+        with ledger.transaction() as db:
+            if not any(row[1] == 'publication_started' for row in db.execute('PRAGMA table_info(jobs)')):
+                db.execute('ALTER TABLE jobs ADD COLUMN publication_started INTEGER NOT NULL DEFAULT 0 '
+                           'CHECK(publication_started IN (0,1))')
 
     def _now(self) -> float:
         now = self.clock()
@@ -141,6 +147,7 @@ class JobQueue:
     def _public(row, *, result=False):
         value = {key: row[key] for key in ("id", "kind", "state", "created", "updated", "expires", "current", "total", "error")}
         value["worker_stopped"] = not bool(row["slot"])
+        value["publishing"] = bool(row["publication_started"])
         if result and row["state"] == "completed":
             value["result"] = json.loads(row["result"])
         return value
@@ -152,7 +159,8 @@ class JobQueue:
         if not isinstance(request_id, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{12,80}", request_id):
             raise AppError("invalid_request_id")
         if (type(ttl) is not int or not 1 <= ttl <= 86400 or type(delay) is not int or not 0 <= delay < ttl
-                or type(reserved_bytes) is not int or not 0 <= reserved_bytes <= self.limits.bytes_owner):
+                or type(reserved_bytes) is not int
+                or not self.kinds[kind].minimum_bytes <= reserved_bytes <= self.limits.bytes_owner):
             raise AppError("invalid_job_budget")
         encoded = _json(payload, 16000)
         self.kinds[kind].validate(json.loads(encoded))
@@ -219,6 +227,8 @@ class JobQueue:
                              (now, now, self.limits.workers_owner, *kinds)).fetchone()
             if row is None:
                 return None
+            if row["reserved_bytes"] < self.kinds[row["kind"]].minimum_bytes:
+                raise AppError("job_kind_budget_mismatch")
             token = secrets.token_hex(32)
             deadline = min(row["expires"], now + row["remaining"], now + self.kinds[row["kind"]].seconds)
             lease_until = min(deadline, now + self.limits.lease_seconds)
@@ -272,11 +282,38 @@ class JobQueue:
         now = self._now()
         with self.ledger.transaction() as db:
             row = self._leased(db, claim)
+            if row["publication_started"]:
+                raise AppError("job_publication_started")
             if row["state"] != {"pause": "pausing", "cancel": "cancelling"}[action]:
                 raise AppError("job_control_not_requested")
             remaining = max(0, row["remaining"] - max(0, now - row["started"]))
             state = "paused" if action == "pause" and remaining > 0 else "cancelled" if action == "cancel" else "expired"
             db.execute("UPDATE jobs SET state=?,remaining=?,updated=? WHERE id=?", (state, remaining, now, row["id"]))
+
+    @staticmethod
+    def _settle_control(db, row, now, state):
+        remaining = max(0, row["remaining"] - max(0, now - row["started"]))
+        state = "cancelled" if state == "cancelling" else "paused" if remaining > 0 else "expired"
+        db.execute("UPDATE jobs SET state=?,remaining=?,updated=? WHERE id=?", (state, remaining, now, row["id"]))
+
+    def begin_publication(self, claim: Claim) -> bool:
+        """Trusted post-reap fence before publishing files; never a member operation or automatic retry."""
+        now = self._now()
+        with self.ledger.transaction() as db:
+            row = self._leased(db, claim)
+            if row["publication_started"]:
+                raise AppError("job_publication_started")
+            state = row["state"]
+            try:
+                self._binding(db, row["instance"], row["owner"], row["chat"])
+            except AppError:
+                state = "cancelling"
+            if state in {"pausing", "cancelling"}:
+                self._settle_control(db, row, now, state)
+                return False
+            db.execute("UPDATE jobs SET publication_started=1,updated=?,lease_until=? WHERE id=?",
+                       (now, min(row["deadline"], now + self.limits.lease_seconds), row["id"]))
+            return True
 
     def finish(self, claim: Claim, *, result: dict | None = None, error: str | None = None) -> None:
         self._finish(claim, result=result, error=error, offline=False)
@@ -295,18 +332,18 @@ class JobQueue:
             row = self._leased(db, claim)
             now = self._now()
             if offline:
+                if row["publication_started"]:
+                    raise AppError("job_publication_started")
                 state = row["state"]
                 try:
                     self._binding(db, row["instance"], row["owner"], row["chat"])
                 except AppError:
                     state = "cancelling"
                 if state in {"pausing", "cancelling"}:
-                    remaining = max(0, row["remaining"] - max(0, now - row["started"]))
-                    state = "cancelled" if state == "cancelling" else "paused" if remaining > 0 else "expired"
-                    db.execute("UPDATE jobs SET state=?,remaining=?,updated=? WHERE id=?", (state, remaining, now, row["id"]))
+                    self._settle_control(db, row, now, state)
                     return
-                if error is None:
-                    db.execute("UPDATE jobs SET current=MAX(total,1),total=MAX(total,1) WHERE id=?", (row["id"],))
+            if error is None and (offline or row["publication_started"]):
+                db.execute("UPDATE jobs SET current=MAX(total,1),total=MAX(total,1) WHERE id=?", (row["id"],))
             db.execute("UPDATE jobs SET state=?,result=?,error=?,updated=? WHERE id=?",
                        ("completed" if error is None else "failed", encoded, error, now, row["id"]))
 
@@ -371,6 +408,8 @@ class JobQueue:
         with self.ledger.transaction() as db:
             row = self._owned(db, identifier, owner, chat, instance)
             state = row["state"]
+            if row["publication_started"] and state in PENDING:
+                raise AppError("job_publication_started")
             if action == "resume":
                 if state != "paused" or row["slot"]:
                     raise AppError("job_not_resumable")

@@ -505,5 +505,8 @@ window.MichiflinLocales.es = {
   "job_state_uncertain": "Pendiente de verificación",
   "invalid_sandbox_output": "El trabajador necesita un archivo de salida anónimo, privado y vacío.",
   "sandbox_file_limit": "El archivo del trabajador supera el tamaño permitido.",
-  "invalid_artifact_output": "No se pudo verificar la salida privada del trabajador."
+  "invalid_artifact_output": "No se pudo verificar la salida privada del trabajador.",
+  "job_publication_started": "Ya comenzó la publicación de la salida privada. Hay que confirmar su resultado antes de reintentar o limpiar.",
+  "job_kind_budget_mismatch": "La tarea revisada necesita una reserva mayor de almacenamiento privado. La ejecución está desactivada.",
+  "job_state_publishing": "Publicando resultado privado"
 };

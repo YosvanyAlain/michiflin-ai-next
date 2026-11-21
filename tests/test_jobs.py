@@ -387,3 +387,143 @@ def test_pending_work_cannot_be_hidden_by_newer_terminal_history(queue, state):
     listing = queue.list('owner-a', 10, 1)['jobs']
     assert len(listing) == 50
     assert listing[0]['id'] == job['id']
+
+
+@pytest.mark.parametrize('minimum', [True, -1, 256 * 1024 * 1024 + 1])
+def test_reviewed_kind_minimum_storage_has_hard_trusted_bounds(minimum):
+    with pytest.raises(ValueError):
+        Kind(validate, minimum_bytes=minimum)
+
+
+def test_output_kind_cannot_be_admitted_or_claimed_with_a_smaller_reservation(queue):
+    queue.kinds['synthetic.v1'] = Kind(validate, minimum_bytes=1024)
+    with pytest.raises(AppError, match='invalid_job_budget'):
+        enqueue(queue, reserved_bytes=1023)
+    job = enqueue(queue, reserved_bytes=1024)
+    with queue.ledger.transaction() as db:
+        db.execute('UPDATE jobs SET reserved_bytes=1023 WHERE id=?', (job['id'],))
+    with pytest.raises(AppError, match='job_kind_budget_mismatch'):
+        queue.claim()
+    assert get(queue, job)['state'] == 'queued' and get(queue, job)['worker_stopped']
+
+
+@pytest.mark.parametrize('action,state', [('pause', 'paused'), ('cancel', 'cancelled'), ('revoke', 'cancelled')])
+def test_prepublication_control_or_revocation_wins_without_a_publication_intent(queue, action, state):
+    job = enqueue(queue, reserved_bytes=100)
+    claim = queue.claim()
+    if action == 'revoke':
+        queue.ledger.revoke(1)
+    else:
+        queue.control('owner-a', 10, 1, job['id'], action)
+    assert not queue.begin_publication(claim)
+    with queue.ledger.connection() as db:
+        row = db.execute('SELECT * FROM jobs').fetchone()
+        assert row['state'] == state and not row['publication_started'] and row['slot']
+    queue.worker_stopped(claim)
+    with queue.ledger.connection() as db:
+        assert db.execute('SELECT slot FROM jobs').fetchone()[0] == 0
+
+
+def test_publication_intent_fences_late_controls_and_cannot_be_replayed_or_discarded(queue):
+    job = enqueue(queue, reserved_bytes=100)
+    claim = queue.claim()
+    assert queue.begin_publication(claim)
+    assert get(queue, job)['publishing'] and not get(queue, job)['worker_stopped']
+    for action in ('pause', 'cancel', 'resume'):
+        with pytest.raises(AppError, match='job_publication_started'):
+            queue.control('owner-a', 10, 1, job['id'], action)
+    with pytest.raises(AppError, match='job_publication_started'):
+        queue.begin_publication(claim)
+    with pytest.raises(AppError, match='job_publication_started'):
+        queue.finish_offline(claim, result={'must_not_discard_publication': True})
+    queue.finish(claim, result={'artifact': 'synthetic-confirmed-private-output'})
+    assert get(queue, job)['state'] == 'completed' and not get(queue, job)['worker_stopped']
+    queue.worker_stopped(claim)
+    assert get(queue, job)['worker_stopped']
+    assert get(queue, job)['current'] == get(queue, job)['total'] == 1
+    queue.release_storage(job['id'])
+
+
+def test_interrupted_publication_is_uncertain_and_keeps_slot_budget_and_replay_fence(queue):
+    job = enqueue(queue, reserved_bytes=100)
+    claim = queue.claim()
+    assert queue.begin_publication(claim)
+    queue.ledger.recover_interrupted()
+    value = get(queue, job)
+    assert value['state'] == 'uncertain' and value['publishing'] and not value['worker_stopped']
+    assert enqueue(queue, reserved_bytes=100)['id'] == job['id']
+    with pytest.raises(AppError, match='job_publication_started'):
+        queue.control('owner-a', 10, 1, job['id'], 'cancel')
+    with pytest.raises(AppError, match='job_cleanup_not_safe'):
+        queue.release_storage(job['id'])
+    with queue.ledger.connection() as db:
+        assert db.execute('SELECT reserved_bytes FROM jobs').fetchone()[0] == 100
+    assert queue.claim() is None
+    queue.worker_stopped(claim)
+    assert get(queue, job)['state'] == 'uncertain' and get(queue, job)['worker_stopped']
+
+
+def test_forged_or_expired_claim_cannot_begin_private_publication(queue):
+    enqueue(queue)
+    claim = queue.claim()
+    with pytest.raises(AppError, match='job_lease_invalid'):
+        queue.begin_publication(replace(claim, token='0' * 64))
+    queue.clock.value += 31
+    with pytest.raises(AppError, match='job_lease_expired'):
+        queue.begin_publication(claim)
+
+
+def test_revocation_after_intent_cannot_turn_published_data_into_false_cancellation(queue):
+    enqueue(queue)
+    claim = queue.claim()
+    assert queue.begin_publication(claim)
+    queue.ledger.revoke(1)
+    assert queue.heartbeat(claim, current=0, total=1)['state'] == 'cancelling'
+    with pytest.raises(AppError, match='job_publication_started'):
+        queue.acknowledge(claim, 'cancel')
+    queue.finish(claim, result={'artifact': 'synthetic-already-confirmed-output'})
+    queue.worker_stopped(claim)
+    with queue.ledger.connection() as db:
+        row = db.execute('SELECT * FROM jobs').fetchone()
+        assert row['state'] == 'completed' and row['result'] and not row['slot']
+
+
+def test_additive_publication_schema_upgrade_preserves_existing_jobs_and_handles_parallel_reopen(queue):
+    job = enqueue(queue)
+    with queue.ledger.transaction() as db:
+        db.execute('ALTER TABLE jobs DROP COLUMN publication_started')
+    def reopen(_):
+        return JobQueue(queue.ledger, kinds=queue.kinds, clock=queue.clock)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        reopened = list(pool.map(reopen, range(4)))
+    for value in reopened:
+        assert not get(value, job)['publishing']
+        assert get(value, job)['state'] == 'queued'
+
+
+def test_atomic_publication_and_cancel_race_has_only_honest_serialized_outcomes(queue):
+    import threading
+    for number in range(1, 21):
+        job = enqueue(queue, number=number)
+        claim = queue.claim()
+        barrier = threading.Barrier(2)
+        def publish(barrier=barrier, claim=claim):
+            barrier.wait(timeout=3)
+            return queue.begin_publication(claim)
+        def cancel(barrier=barrier, job=job):
+            barrier.wait(timeout=3)
+            try:
+                return queue.control('owner-a', 10, 1, job['id'], 'cancel')['state']
+            except AppError as error:
+                return error.code
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            publication = pool.submit(publish)
+            cancellation = pool.submit(cancel)
+            entered, control = publication.result(timeout=5), cancellation.result(timeout=5)
+        if entered:
+            assert control == 'job_publication_started'
+            queue.finish(claim, result={'confirmed': True})
+        else:
+            assert control == 'cancelling'
+            assert get(queue, job)['state'] == 'cancelled'
+        queue.worker_stopped(claim)
