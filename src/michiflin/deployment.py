@@ -34,7 +34,10 @@ def checksum(path: Path) -> str:
 
 
 class PrivateStore:
-    def __init__(self, repository: str, token: str) -> None:
+    def __init__(self, repository: str, token: str, tag: str = TAG) -> None:
+        if not isinstance(tag, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", tag):
+            raise ValueError("Invalid private checkpoint namespace")
+        self.tag = tag
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) or not token:
             raise ValueError("Private backup configuration is required")
         self.base = "https://api.github.com/repos/" + repository
@@ -52,9 +55,9 @@ class PrivateStore:
         return response.json()
 
     def release(self) -> dict:
-        response = self.session.get(self.base + "/releases/tags/" + TAG, timeout=(5, 30), allow_redirects=False)
+        response = self.session.get(self.base + "/releases/tags/" + self.tag, timeout=(5, 30), allow_redirects=False)
         if response.status_code == 404:
-            return self.json("POST", "/releases", json={"tag_name": TAG, "name": "Authenticated next runtime checkpoints",
+            return self.json("POST", "/releases", json={"tag_name": self.tag, "name": "Authenticated next runtime checkpoints",
                                                        "body": "Private encrypted state. Previous recovery assets are retained.",
                                                        "draft": False, "prerelease": False})
         response.raise_for_status()
@@ -218,7 +221,8 @@ def execute(*, validate_only: bool, duration: int, directory: Path, source: Path
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     with (directory / "deployment.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        store = PrivateStore(os.environ["MICHIFLIN_BACKUP_REPOSITORY"], os.environ["MICHIFLIN_BACKUP_TOKEN"])
+        store = PrivateStore(os.environ["MICHIFLIN_BACKUP_REPOSITORY"], os.environ["MICHIFLIN_BACKUP_TOKEN"],
+                             os.environ.get("MICHIFLIN_CHECKPOINT_NAMESPACE", TAG))
         release = store.release()
         work = Path(tempfile.mkdtemp(prefix="next-session-", dir=directory))
         completed = False

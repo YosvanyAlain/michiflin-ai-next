@@ -240,3 +240,26 @@ def test_explicit_catalogue_preparation_precedes_a_real_checkpoint_without_start
 
 def test_operator_catalogue_bootstrap_is_explicit_and_never_starts_io_in_validation(tmp_path, monkeypatch):
     _execute_fixture(tmp_path, monkeypatch, validate_only=True, prepare_catalog=True, catalog_feed=tmp_path / 'verified.csv.gz')
+
+
+@pytest.mark.parametrize("invalid", ["", "../other", "a/b", "a?b", "a#b", "a b", "a" * 97, None])
+def test_private_checkpoint_namespace_rejects_unsafe_paths(monkeypatch, invalid):
+    session = Mock()
+    monkeypatch.setattr(deployment.requests, "Session", session)
+    with pytest.raises(ValueError, match="namespace"):
+        deployment.PrivateStore("synthetic/recovery", "synthetic-token", invalid)
+    session.assert_not_called()
+
+
+@pytest.mark.parametrize("tag", [deployment.TAG, "michiflin-next-independent-v1"])
+def test_private_checkpoint_namespace_is_used_for_lookup_and_creation(monkeypatch, tag):
+    session = Mock()
+    metadata = Mock()
+    metadata.json.return_value = {"private": True, "permissions": {"push": True}}
+    session.request.return_value = metadata
+    session.get.return_value.status_code = 404
+    monkeypatch.setattr(deployment.requests, "Session", lambda: session)
+    store = deployment.PrivateStore("synthetic/recovery", "synthetic-token", tag)
+    store.release()
+    assert session.get.call_args.args[0].endswith("/releases/tags/" + tag)
+    assert session.request.call_args.kwargs["json"]["tag_name"] == tag

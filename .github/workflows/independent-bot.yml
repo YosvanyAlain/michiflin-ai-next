@@ -1,0 +1,74 @@
+name: Independent Michiflin Next bot
+on:
+  schedule:
+    - cron: '25 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Validation never starts mail IO
+        type: choice
+        options: [validate-only, run]
+        default: validate-only
+        required: true
+      seconds:
+        description: Bounded session duration
+        type: choice
+        options: ['60', '19200']
+        default: '60'
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: independent-michiflin-next-identity-v1
+  cancel-in-progress: false
+jobs:
+  independent-session:
+    if: github.event_name == 'workflow_dispatch' || vars.INDEPENDENT_LAUNCH_REVISION == github.sha
+    runs-on: ubuntu-24.04
+    timeout-minutes: 358
+    env:
+      PYTHONUNBUFFERED: '1'
+      MICHIFLIN_DEPLOY_REVISION: ${{ github.sha }}
+      MICHIFLIN_LAUNCH_REVISION: ${{ vars.INDEPENDENT_LAUNCH_REVISION }}
+      MICHIFLIN_DEPLOY_CONFIG: ${{ secrets.INDEPENDENT_RUNTIME_CONFIG }}
+      MICHIFLIN_BACKUP_PASSPHRASE: ${{ secrets.INDEPENDENT_BACKUP_PASSPHRASE }}
+      MICHIFLIN_BACKUP_TOKEN: ${{ secrets.INDEPENDENT_BACKUP_TOKEN }}
+      MICHIFLIN_BACKUP_REPOSITORY: ${{ secrets.INDEPENDENT_BACKUP_REPOSITORY }}
+      MICHIFLIN_CHECKPOINT_NAMESPACE: michiflin-next-independent-v1
+      MICHIFLIN_SEED_ASSET_ID: ${{ vars.INDEPENDENT_SEED_ASSET_ID }}
+      MICHIFLIN_SEED_SHA256: ${{ vars.INDEPENDENT_SEED_SHA256 }}
+      MICHIFLIN_SESSION_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'run' }}
+      MICHIFLIN_SESSION_SECONDS: ${{ github.event_name == 'workflow_dispatch' && inputs.seconds || '19200' }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install reviewed runtime dependencies and isolated workers
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap libseccomp2
+          sudo bash tools/setup_sandbox.sh
+          python -m pip install -e '.[bot]'
+          python tools/check_sandbox.py
+      - name: Verify private recovery or run the independent account
+        run: |
+          umask 077
+          flags=()
+          if [ "$MICHIFLIN_SESSION_MODE" = 'validate-only' ]; then
+            flags+=(--validate-only)
+          elif [ "$MICHIFLIN_SESSION_MODE" != 'run' ]; then
+            exit 1
+          fi
+          python -m michiflin.deployment "${flags[@]}" --duration "$MICHIFLIN_SESSION_SECONDS" --directory "$RUNNER_TEMP/michiflin-independent" --source "$GITHUB_WORKSPACE/miniapp"
+      - name: Preserve only encrypted rescue snapshots after failure
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: independent-encrypted-rescue-${{ github.run_id }}
+          path: ${{ runner.temp }}/michiflin-independent/recovery/*.snapshot
+          if-no-files-found: ignore
+          retention-days: 14
